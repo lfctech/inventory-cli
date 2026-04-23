@@ -1,0 +1,36 @@
+# Default configuration for inventory CLI.
+# Generate this file with: inventory init
+# See PLAN.md for full schema documentation.
+
+[snipeit]
+# Default model and status names — resolved by name against Snipe-IT at runtime.
+default_model        = "Laptop"
+intake_status        = "Intake"
+refurbished_status   = "Refurbished"
+
+[custom_fields]
+# Maps CLI argument names -> Snipe-IT custom field db column names.
+# Update these to match your Snipe-IT instance's custom field keys.
+cpu_model     = "_snipeit_cpu_model_1"
+cpu_passmark  = "_snipeit_cpu_passmark_2"
+ram_gb        = "_snipeit_ram_gb_3"
+storage_gb    = "_snipeit_storage_gb_4"
+sale_price    = "_snipeit_sale_price_5"
+touch_screen  = "_snipeit_touch_screen_6"
+
+[pricing]
+# Points -> price tier table.
+# Each entry is [min_points, price_usd]. Evaluated top-down; first match wins.
+tiers = [
+    [6,  100],
+    [10, 125],
+    [14, 150],
+    [18, 175],
+    [24, 200],
+    [999, 250],
+]
+touch_screen_bonus = 20
+desktop_penalty    = 3
+
+[passmark]
+fuzzy_threshold = 80  # confidence % below which operator is prompted
