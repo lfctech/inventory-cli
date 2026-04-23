@@ -2,12 +2,6 @@
 # Generate this file with: inventory init
 # See PLAN.md for full schema documentation.
 
-[snipeit]
-# Default model and status names — resolved by name against Snipe-IT at runtime.
-default_model        = "Laptop"
-intake_status        = "Intake"
-refurbished_status   = "Refurbished"
-
 [custom_fields]
 # Maps CLI argument names -> Snipe-IT custom field db column names.
 # Update these to match your Snipe-IT instance's custom field keys.

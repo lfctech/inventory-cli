@@ -22,13 +22,6 @@ from typing import Any
 DEFAULT_CONFIG_TEMPLATE = """\
 # Default configuration for inventory CLI.
 # Generate this file with: inventory init
-# See PLAN.md for full schema documentation.
-
-[snipeit]
-# Default model and status names — resolved by name against Snipe-IT at runtime.
-default_model        = "Laptop"
-intake_status        = "Intake"
-refurbished_status   = "Refurbished"
 
 [custom_fields]
 # Maps CLI argument names -> Snipe-IT custom field db column names.
@@ -59,14 +52,7 @@ fuzzy_threshold = 80  # confidence % below which operator is prompted
 """
 
 
-# ── Parsed config dataclass ──────────────────────────────────────────────────
-
-@dataclass
-class SnipeITConfig:
-    default_model: str = "Laptop"
-    intake_status: str = "Intake"
-    refurbished_status: str = "Refurbished"
-
+# ── Parsed config dataclasses ────────────────────────────────────────────────
 
 @dataclass
 class CustomFieldsConfig:
@@ -98,7 +84,6 @@ class PassmarkConfig:
 
 @dataclass
 class AppConfig:
-    snipeit: SnipeITConfig = field(default_factory=SnipeITConfig)
     custom_fields: CustomFieldsConfig = field(default_factory=CustomFieldsConfig)
     pricing: PricingConfig = field(default_factory=PricingConfig)
     passmark: PassmarkConfig = field(default_factory=PassmarkConfig)
@@ -163,16 +148,9 @@ def load_config(config_path: Path) -> AppConfig:
     except tomllib.TOMLDecodeError as exc:
         raise ValueError(f"config.toml is invalid TOML: {exc}") from exc
 
-    snipeit_raw = raw.get("snipeit", {})
     custom_fields_raw = raw.get("custom_fields", {})
     pricing_raw = raw.get("pricing", {})
     passmark_raw = raw.get("passmark", {})
-
-    snipeit = SnipeITConfig(
-        default_model=snipeit_raw.get("default_model", "Laptop"),
-        intake_status=snipeit_raw.get("intake_status", "Intake"),
-        refurbished_status=snipeit_raw.get("refurbished_status", "Refurbished"),
-    )
 
     custom_fields = CustomFieldsConfig(
         cpu_model=custom_fields_raw.get("cpu_model", "_snipeit_cpu_model_1"),
@@ -195,7 +173,6 @@ def load_config(config_path: Path) -> AppConfig:
     )
 
     return AppConfig(
-        snipeit=snipeit,
         custom_fields=custom_fields,
         pricing=pricing,
         passmark=passmark,
