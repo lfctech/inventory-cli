@@ -16,18 +16,23 @@ def make_client(url: str | None = None, api_key: str | None = None) -> SnipeIT:
     """
     Create a configured SnipeIT client.
 
-    Resolution order:
-      1. Explicit arguments (from --url / --api-key CLI flags)
-      2. Environment variables (SNIPERIT_URL / SNIPERIT_API_KEY)
+    URL resolution order:
+      1. Explicit ``url`` argument (from --url CLI flag)
+      2. SNIPERIT_URL environment variable
+      3. config.toml [snipeit].url (caller resolves and passes as ``url``)
 
-    Raises ValueError if neither source provides the required values.
+    API key resolution order:
+      1. Explicit ``api_key`` argument (from --api-key CLI flag)
+      2. SNIPERIT_API_KEY environment variable
+
+    Raises ValueError if required values cannot be resolved.
     """
     resolved_url = url or os.environ.get("SNIPERIT_URL")
     resolved_key = api_key or os.environ.get("SNIPERIT_API_KEY")
 
     if not resolved_url:
         raise ValueError(
-            "Snipe-IT URL not set. Set SNIPERIT_URL or pass --url."
+            "Snipe-IT URL not set. Use config.toml [snipeit].url, SNIPERIT_URL env var, or --url."
         )
     if not resolved_key:
         raise ValueError(

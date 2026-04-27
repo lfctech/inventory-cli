@@ -1,6 +1,6 @@
 # inventory CLI
 
-A Python CLI for managing [Snipe-IT](https://snipeitapp.com) assets — replacing the `inventory-resources` scripts with a clean, composable command-line tool.
+A Python CLI for managing [Snipe-IT](https://snipeitapp.com) assets with a clean, composable command-line tool.
 
 Built with [`uv`](https://docs.astral.sh/uv/) and [`typer`](https://typer.tiangolo.com/).
 
@@ -11,8 +11,7 @@ Built with [`uv`](https://docs.astral.sh/uv/) and [`typer`](https://typer.tiango
 ### With `uvx` (no clone required)
 
 ```bash
-# Set credentials
-export SNIPERIT_URL="https://inventory.lfctech.org"
+# Set API key (URL is now in config.toml [snipeit].url)
 export SNIPERIT_API_KEY="your-api-key"
 export INVENTORY_CONFIG="/path/to/your/config.toml"
 
@@ -52,14 +51,24 @@ Config resolution order:
 
 ## Authentication
 
-No `.env` file loading. Set credentials in the environment:
+No `.env` file loading. Credentials are resolved as follows:
 
-| Variable | Description |
-|----------|-------------|
-| `SNIPERIT_URL` | Snipe-IT instance URL |
-| `SNIPERIT_API_KEY` | API bearer token |
+**URL** — three-tier resolution (first match wins):
 
-Or pass them directly:
+| Priority | Source |
+|----------|--------|
+| 1 | `--url` CLI flag |
+| 2 | `SNIPERIT_URL` environment variable |
+| 3 | `config.toml` → `[snipeit].url` |
+
+**API key** — two-tier resolution:
+
+| Priority | Source |
+|----------|--------|
+| 1 | `--api-key` CLI flag |
+| 2 | `SNIPERIT_API_KEY` environment variable |
+
+Or pass both directly:
 
 ```bash
 inventory --url https://... --api-key token123 assets get --tag LFC-1042
@@ -176,9 +185,9 @@ Tiers and bonuses are configurable in `config.toml`.
 ## ProcMan Integration
 
 ```powershell
-$env:SNIPERIT_URL     = "https://inventory.lfctech.org"
 $env:SNIPERIT_API_KEY = $secrets.SnipeItKey
 $env:INVENTORY_CONFIG = "$PSScriptRoot\inventory\config.toml"
+# URL is read from config.toml [snipeit].url
 
 uvx --from git+https://github.com/lfctech/inventory-cli inventory assets price --serial $serial
 ```

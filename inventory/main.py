@@ -99,6 +99,10 @@ def main(
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
 
+    # Apply config URL as fallback (flag/env take priority — already captured above)
+    if state.url is None and state.config.snipeit.url:
+        state.url = state.config.snipeit.url
+
 
 # ── Init command ──────────────────────────────────────────────────────────────
 

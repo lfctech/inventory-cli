@@ -2,6 +2,10 @@
 # Generate this file with: inventory init
 # See PLAN.md for full schema documentation.
 
+[snipeit]
+# Snipe-IT instance URL. Can also be set via SNIPERIT_URL env var or --url flag.
+url = "https://inventory.lfctech.org"
+
 [custom_fields]
 # Maps CLI argument names -> Snipe-IT custom field db column names.
 # Update these to match your Snipe-IT instance's custom field keys.

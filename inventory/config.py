@@ -21,6 +21,10 @@ DEFAULT_CONFIG_TEMPLATE = """\
 # Default configuration for inventory CLI.
 # Generate this file with: inventory init
 
+[snipeit]
+# Snipe-IT instance URL. Can also be set via SNIPERIT_URL env var or --url flag.
+url = "https://inventory.example.com"
+
 [custom_fields]
 # Maps CLI argument names -> Snipe-IT custom field db column names.
 # Update these to match your Snipe-IT instance's custom field keys.
@@ -53,6 +57,11 @@ fuzzy_threshold = 80  # confidence % below which operator is prompted
 # ── Parsed config dataclasses ────────────────────────────────────────────────
 
 @dataclass
+class SnipeITConfig:
+    url: str | None = None
+
+
+@dataclass
 class CustomFieldsConfig:
     cpu_model: str = "_snipeit_cpu_model_1"
     cpu_passmark: str = "_snipeit_cpu_passmark_2"
@@ -82,6 +91,7 @@ class PassmarkConfig:
 
 @dataclass
 class AppConfig:
+    snipeit: SnipeITConfig = field(default_factory=SnipeITConfig)
     custom_fields: CustomFieldsConfig = field(default_factory=CustomFieldsConfig)
     pricing: PricingConfig = field(default_factory=PricingConfig)
     passmark: PassmarkConfig = field(default_factory=PassmarkConfig)
@@ -146,9 +156,14 @@ def load_config(config_path: Path) -> AppConfig:
     except tomllib.TOMLDecodeError as exc:
         raise ValueError(f"config.toml is invalid TOML: {exc}") from exc
 
+    snipeit_raw = raw.get("snipeit", {})
     custom_fields_raw = raw.get("custom_fields", {})
     pricing_raw = raw.get("pricing", {})
     passmark_raw = raw.get("passmark", {})
+
+    snipeit = SnipeITConfig(
+        url=snipeit_raw.get("url"),
+    )
 
     custom_fields = CustomFieldsConfig(
         cpu_model=custom_fields_raw.get("cpu_model", "_snipeit_cpu_model_1"),
@@ -171,6 +186,7 @@ def load_config(config_path: Path) -> AppConfig:
     )
 
     return AppConfig(
+        snipeit=snipeit,
         custom_fields=custom_fields,
         pricing=pricing,
         passmark=passmark,
