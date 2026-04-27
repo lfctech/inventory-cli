@@ -7,14 +7,11 @@ inventory.commands.assets
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NoReturn
 
 import typer
 from rich.console import Console
 from rich.table import Table
-
 from snipeit import SnipeIT
 from snipeit.exceptions import (
     SnipeITAuthenticationError,
@@ -27,9 +24,9 @@ from snipeit.exceptions import (
 from ..client import make_client
 from ..config import AppConfig
 from ..core.passmark import get_average_score, lookup_csv
-from ..core.pricing import PriceBreakdown, calculate_price, is_desktop_category
+from ..core.pricing import calculate_price, is_desktop_category
 from ..core.resolvers import resolve_model, resolve_status_label
-from ..main import get_config, state
+from ..main import state
 
 console = Console(stderr=True)
 out = Console()  # stdout for data output
@@ -57,15 +54,15 @@ def _get_client() -> SnipeIT:
         return make_client(state.url, state.api_key)
     except ValueError as exc:
         console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
-def _handle_api_error(exc: Exception) -> None:
+def _handle_api_error(exc: Exception) -> NoReturn:
     """Print a user-friendly error and exit."""
     if isinstance(exc, SnipeITAuthenticationError):
         console.print("[red]Error:[/red] Authentication failed. Check your API key.")
     elif isinstance(exc, SnipeITNotFoundError):
-        console.print(f"[red]Error:[/red] Asset not found.")
+        console.print("[red]Error:[/red] Asset not found.")
     elif isinstance(exc, SnipeITValidationError):
         console.print(f"[red]Error:[/red] Validation failed — {exc}")
     elif isinstance(exc, SnipeITServerError):
@@ -98,6 +95,7 @@ def _resolve_asset(
         elif tag is not None:
             return client.assets.get_by_tag(tag)
         else:
+            assert serial is not None
             return client.assets.get_by_serial(serial)
     except Exception as exc:
         _handle_api_error(exc)
@@ -192,9 +190,9 @@ def _asset_dict(asset: Any, cfg: AppConfig) -> dict:
 
 @assets_app.command()
 def get(
-    id: Optional[int] = typer.Option(None, "--id", help="Asset ID."),
-    tag: Optional[str] = typer.Option(None, "--tag", help="Asset tag."),
-    serial: Optional[str] = typer.Option(None, "--serial", help="Serial number."),
+    id: int | None = typer.Option(None, "--id", help="Asset ID."),
+    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
+    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
 ) -> None:
     """Fetch and display a single asset."""
     cfg = _require_config()
@@ -212,14 +210,14 @@ def get(
 def create(
     model: str = typer.Option(..., "--model", help="Model name (resolved to ID via API)."),
     status: str = typer.Option(..., "--status", help="Status label name (resolved to ID via API)."),
-    asset_tag: Optional[str] = typer.Option(None, "--asset-tag", help="Asset tag (auto-assigned if omitted)."),
-    serial: Optional[str] = typer.Option(None, "--serial", help="Serial number."),
-    name: Optional[str] = typer.Option(None, "--name", help="Asset name."),
-    cpu: Optional[str] = typer.Option(None, "--cpu", help="CPU model string."),
-    ram: Optional[int] = typer.Option(None, "--ram", help="RAM in GB."),
-    storage: Optional[int] = typer.Option(None, "--storage", help="Storage in GB."),
-    touch_screen: Optional[bool] = typer.Option(None, "--touch-screen/--no-touch-screen", help="Has touch screen."),
-    passmark: Optional[int] = typer.Option(None, "--passmark", help="CPU PassMark score."),
+    asset_tag: str | None = typer.Option(None, "--asset-tag", help="Asset tag (auto-assigned if omitted)."),
+    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
+    name: str | None = typer.Option(None, "--name", help="Asset name."),
+    cpu: str | None = typer.Option(None, "--cpu", help="CPU model string."),
+    ram: int | None = typer.Option(None, "--ram", help="RAM in GB."),
+    storage: int | None = typer.Option(None, "--storage", help="Storage in GB."),
+    touch_screen: bool | None = typer.Option(None, "--touch-screen/--no-touch-screen", help="Has touch screen."),
+    passmark: int | None = typer.Option(None, "--passmark", help="CPU PassMark score."),
 ) -> None:
     """Create a new asset in Snipe-IT."""
     cfg = _require_config()
@@ -231,7 +229,7 @@ def create(
         status_id = resolve_status_label(client, status)
     except ValueError as exc:
         console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     # Build payload
     payload: dict[str, Any] = {
@@ -265,24 +263,24 @@ def create(
     if state.json_output:
         out.print_json(json.dumps(_asset_dict(asset, cfg)))
     else:
-        console.print(f"[green]✓[/green] Asset created.")
+        console.print("[green]✓[/green] Asset created.")
         out.print(_asset_table(asset, cfg))
 
 
 @assets_app.command()
 def update(
-    id: Optional[int] = typer.Option(None, "--id", help="Asset ID (to look up)."),
-    tag: Optional[str] = typer.Option(None, "--tag", help="Asset tag (to look up)."),
-    serial: Optional[str] = typer.Option(None, "--serial", help="Serial number (to look up)."),
-    model: Optional[str] = typer.Option(None, "--model", help="Model name (resolved to ID via API)."),
-    status: Optional[str] = typer.Option(None, "--status", help="Status label name (resolved to ID via API)."),
-    name: Optional[str] = typer.Option(None, "--name", help="Asset name."),
-    cpu: Optional[str] = typer.Option(None, "--cpu", help="CPU model string."),
-    ram: Optional[int] = typer.Option(None, "--ram", help="RAM in GB."),
-    storage: Optional[int] = typer.Option(None, "--storage", help="Storage in GB."),
-    touch_screen: Optional[bool] = typer.Option(None, "--touch-screen/--no-touch-screen", help="Has touch screen."),
-    passmark: Optional[int] = typer.Option(None, "--passmark", help="CPU PassMark score."),
-    sale_price: Optional[float] = typer.Option(None, "--sale-price", help="Sale price in dollars."),
+    id: int | None = typer.Option(None, "--id", help="Asset ID (to look up)."),
+    tag: str | None = typer.Option(None, "--tag", help="Asset tag (to look up)."),
+    serial: str | None = typer.Option(None, "--serial", help="Serial number (to look up)."),
+    model: str | None = typer.Option(None, "--model", help="Model name (resolved to ID via API)."),
+    status: str | None = typer.Option(None, "--status", help="Status label name (resolved to ID via API)."),
+    name: str | None = typer.Option(None, "--name", help="Asset name."),
+    cpu: str | None = typer.Option(None, "--cpu", help="CPU model string."),
+    ram: int | None = typer.Option(None, "--ram", help="RAM in GB."),
+    storage: int | None = typer.Option(None, "--storage", help="Storage in GB."),
+    touch_screen: bool | None = typer.Option(None, "--touch-screen/--no-touch-screen", help="Has touch screen."),
+    passmark: int | None = typer.Option(None, "--passmark", help="CPU PassMark score."),
+    sale_price: float | None = typer.Option(None, "--sale-price", help="Sale price in dollars."),
 ) -> None:
     """Update one or more fields on an existing asset."""
     cfg = _require_config()
@@ -299,14 +297,14 @@ def update(
             payload["model_id"] = resolve_model(client, model)
         except ValueError as exc:
             console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
     if status is not None:
         try:
             payload["status_id"] = resolve_status_label(client, status)
         except ValueError as exc:
             console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
     if name is not None:
         payload["name"] = name
@@ -341,13 +339,13 @@ def update(
 
 @assets_app.command()
 def price(
-    id: Optional[int] = typer.Option(None, "--id", help="Asset ID."),
-    tag: Optional[str] = typer.Option(None, "--tag", help="Asset tag."),
-    serial: Optional[str] = typer.Option(None, "--serial", help="Serial number."),
-    passmark_override: Optional[int] = typer.Option(None, "--passmark", help="Override PassMark score."),
-    ram_override: Optional[int] = typer.Option(None, "--ram", help="RAM in GB (reads from asset if omitted)."),
-    storage_override: Optional[int] = typer.Option(None, "--storage", help="Storage in GB (reads from asset if omitted)."),
-    touch_override: Optional[bool] = typer.Option(None, "--touch-screen/--no-touch-screen", help="Has touch screen (reads from asset if omitted)."),
+    id: int | None = typer.Option(None, "--id", help="Asset ID."),
+    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
+    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
+    passmark_override: int | None = typer.Option(None, "--passmark", help="Override PassMark score."),
+    ram_override: int | None = typer.Option(None, "--ram", help="RAM in GB (reads from asset if omitted)."),
+    storage_override: int | None = typer.Option(None, "--storage", help="Storage in GB (reads from asset if omitted)."),
+    touch_override: bool | None = typer.Option(None, "--touch-screen/--no-touch-screen", help="Has touch screen (reads from asset if omitted)."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print price without writing to Snipe-IT."),
 ) -> None:
     """Calculate the sale price and write it to the asset."""
@@ -369,7 +367,7 @@ def price(
                 ram_gb = float(raw)
             except ValueError:
                 console.print(f"[red]Error:[/red] Cannot parse RAM value '{raw}' from asset. Pass --ram.")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from None
         else:
             console.print("[red]Error:[/red] Asset has no RAM value. Pass --ram.")
             raise typer.Exit(1)
@@ -384,7 +382,7 @@ def price(
                 storage_gb = float(raw)
             except ValueError:
                 console.print(f"[red]Error:[/red] Cannot parse storage value '{raw}' from asset. Pass --storage.")
-                raise typer.Exit(1)
+                raise typer.Exit(1) from None
         else:
             console.print("[red]Error:[/red] Asset has no storage value. Pass --storage.")
             raise typer.Exit(1)
@@ -517,9 +515,9 @@ def price(
 
 @assets_app.command()
 def label(
-    id: Optional[int] = typer.Option(None, "--id", help="Asset ID."),
-    tag: Optional[str] = typer.Option(None, "--tag", help="Asset tag."),
-    serial: Optional[str] = typer.Option(None, "--serial", help="Serial number."),
+    id: int | None = typer.Option(None, "--id", help="Asset ID."),
+    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
+    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
     output: str = typer.Option("./label.pdf", "--output", "-o", help="Where to save the PDF."),
 ) -> None:
     """Generate and save the label PDF for an asset."""

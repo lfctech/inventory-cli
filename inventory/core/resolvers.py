@@ -32,7 +32,10 @@ def resolve_model(client: SnipeIT, name: str) -> int:
     ]
 
     if len(matches) == 1:
-        return matches[0].id
+        match_id = matches[0].id
+        if match_id is None:
+            raise ValueError(f'Model "{name_n}" has no ID')
+        return int(match_id)
 
     if len(matches) > 1:
         names = [_norm(getattr(m, "name", "")) for m in matches]
@@ -62,7 +65,10 @@ def resolve_status_label(client: SnipeIT, name: str) -> int:
     ]
 
     if len(matches) == 1:
-        return matches[0].id
+        match_id = matches[0].id
+        if match_id is None:
+            raise ValueError(f'Status label "{name_n}" has no ID')
+        return int(match_id)
 
     if len(matches) > 1:
         names = [_norm(getattr(s, "name", "")) for s in matches]

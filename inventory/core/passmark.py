@@ -15,7 +15,6 @@ import importlib.resources
 import logging
 import re
 from io import StringIO
-from pathlib import Path
 from typing import TypedDict
 
 from rapidfuzz import fuzz
@@ -91,7 +90,7 @@ def lookup_csv(cpu_name: str) -> PassmarkResult | None:
     Return the best PassMark result for ``cpu_name`` from the bundled CSV,
     or ``None`` if the CSV contains no scoreable rows.
 
-    The returned ``confidence`` field is 0–100.
+    The returned ``confidence`` field is 0-100.
     """
     try:
         rows = _load_bundled_csv()

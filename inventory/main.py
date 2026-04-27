@@ -7,14 +7,18 @@ Typer CLI entry point.  Defines the root ``inventory`` app, global options
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
 
-from .config import AppConfig, resolve_config_path, load_config, DEFAULT_CONFIG_TEMPLATE, _xdg_config_path
+from .config import (
+    DEFAULT_CONFIG_TEMPLATE,
+    AppConfig,
+    _xdg_config_path,
+    load_config,
+    resolve_config_path,
+)
 
 console = Console(stderr=True)
 
@@ -51,21 +55,21 @@ def get_config() -> AppConfig:
 
 @app.callback()
 def main(
-    url: Optional[str] = typer.Option(
+    url: str | None = typer.Option(
         None,
         "--url",
         envvar="SNIPERIT_URL",
         help="Snipe-IT instance URL.",
         show_default=False,
     ),
-    api_key: Optional[str] = typer.Option(
+    api_key: str | None = typer.Option(
         None,
         "--api-key",
         envvar="SNIPERIT_API_KEY",
         help="Snipe-IT API key.",
         show_default=False,
     ),
-    config_path: Optional[str] = typer.Option(
+    config_path: str | None = typer.Option(
         None,
         "--config",
         envvar="INVENTORY_CONFIG",
@@ -93,14 +97,14 @@ def main(
         state.config = load_config(resolved)
     except ValueError as exc:
         console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 # ── Init command ──────────────────────────────────────────────────────────────
 
 @app.command()
 def init(
-    output: Optional[str] = typer.Option(
+    output: str | None = typer.Option(
         None,
         "--output", "-o",
         help="Where to write config.toml. Defaults to ~/.config/inventory/config.toml.",
