@@ -22,7 +22,7 @@ DEFAULT_CONFIG_TEMPLATE = """\
 # Generate this file with: inventory init
 
 [snipeit]
-# Snipe-IT instance URL. Can also be set via SNIPERIT_URL env var or --url flag.
+# Snipe-IT instance URL. Can also be set via SNIPEIT_URL env var or --url flag.
 url = "https://inventory.example.com"
 
 [custom_fields]

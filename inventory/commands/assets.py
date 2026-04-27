@@ -6,7 +6,6 @@ inventory.commands.assets
 
 from __future__ import annotations
 
-import json
 from typing import Any, NoReturn
 
 import typer
@@ -186,6 +185,32 @@ def _asset_dict(asset: Any, cfg: AppConfig) -> dict:
     }
 
 
+def _build_custom_fields(
+    cfg: AppConfig,
+    cpu: str | None = None,
+    ram: int | None = None,
+    storage: int | None = None,
+    touch_screen: bool | None = None,
+    passmark: int | None = None,
+    sale_price: float | None = None,
+) -> dict[str, str]:
+    """Map optional hardware values to their Snipe-IT custom field keys."""
+    fields: dict[str, str] = {}
+    if cpu is not None:
+        fields[cfg.custom_fields.cpu_model] = cpu
+    if ram is not None:
+        fields[cfg.custom_fields.ram_gb] = str(ram)
+    if storage is not None:
+        fields[cfg.custom_fields.storage_gb] = str(storage)
+    if touch_screen is not None:
+        fields[cfg.custom_fields.touch_screen] = "1" if touch_screen else "0"
+    if passmark is not None:
+        fields[cfg.custom_fields.cpu_passmark] = str(passmark)
+    if sale_price is not None:
+        fields[cfg.custom_fields.sale_price] = str(int(sale_price))
+    return fields
+
+
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 @assets_app.command()
@@ -201,7 +226,7 @@ def get(
     asset = _resolve_asset(client, id, tag, serial)
 
     if state.json_output:
-        out.print_json(json.dumps(_asset_dict(asset, cfg)))
+        out.print_json(data=_asset_dict(asset, cfg))
     else:
         out.print(_asset_table(asset, cfg))
 
@@ -244,16 +269,7 @@ def create(
         payload["name"] = name
 
     # Custom fields
-    if cpu is not None:
-        payload[cfg.custom_fields.cpu_model] = cpu
-    if ram is not None:
-        payload[cfg.custom_fields.ram_gb] = str(ram)
-    if storage is not None:
-        payload[cfg.custom_fields.storage_gb] = str(storage)
-    if touch_screen is not None:
-        payload[cfg.custom_fields.touch_screen] = "1" if touch_screen else "0"
-    if passmark is not None:
-        payload[cfg.custom_fields.cpu_passmark] = str(passmark)
+    payload.update(_build_custom_fields(cfg, cpu=cpu, ram=ram, storage=storage, touch_screen=touch_screen, passmark=passmark))
 
     try:
         asset = client.assets.create(**payload)
@@ -261,7 +277,7 @@ def create(
         _handle_api_error(exc)
 
     if state.json_output:
-        out.print_json(json.dumps(_asset_dict(asset, cfg)))
+        out.print_json(data=_asset_dict(asset, cfg))
     else:
         console.print("[green]✓[/green] Asset created.")
         out.print(_asset_table(asset, cfg))
@@ -308,18 +324,10 @@ def update(
 
     if name is not None:
         payload["name"] = name
-    if cpu is not None:
-        payload[cfg.custom_fields.cpu_model] = cpu
-    if ram is not None:
-        payload[cfg.custom_fields.ram_gb] = str(ram)
-    if storage is not None:
-        payload[cfg.custom_fields.storage_gb] = str(storage)
-    if touch_screen is not None:
-        payload[cfg.custom_fields.touch_screen] = "1" if touch_screen else "0"
-    if passmark is not None:
-        payload[cfg.custom_fields.cpu_passmark] = str(passmark)
-    if sale_price is not None:
-        payload[cfg.custom_fields.sale_price] = str(int(sale_price))
+    payload.update(_build_custom_fields(
+        cfg, cpu=cpu, ram=ram, storage=storage,
+        touch_screen=touch_screen, passmark=passmark, sale_price=sale_price,
+    ))
 
     if not payload:
         console.print("[yellow]Warning:[/yellow] No fields to update.")
@@ -331,7 +339,7 @@ def update(
         _handle_api_error(exc)
 
     if state.json_output:
-        out.print_json(json.dumps(_asset_dict(updated, cfg)))
+        out.print_json(data=_asset_dict(updated, cfg))
     else:
         console.print(f"[green]✓[/green] Asset {asset_id} updated.")
         out.print(_asset_table(updated, cfg))
@@ -472,7 +480,7 @@ def price(
             "passmark_source": passmark_source,
             **breakdown.as_dict(),
         }
-        out.print_json(json.dumps(data))
+        out.print_json(data=data)
     else:
         table = Table(title="Price Calculation", show_header=True, header_style="bold cyan")
         table.add_column("Component", style="bold")

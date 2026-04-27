@@ -3,7 +3,7 @@
 # See PLAN.md for full schema documentation.
 
 [snipeit]
-# Snipe-IT instance URL. Can also be set via SNIPERIT_URL env var or --url flag.
+# Snipe-IT instance URL. Can also be set via SNIPEIT_URL env var or --url flag.
 url = "https://inventory.lfctech.org"
 
 [custom_fields]

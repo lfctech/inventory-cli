@@ -11,6 +11,7 @@ instead of thefuzz for better performance and no C-extension issues.
 from __future__ import annotations
 
 import csv
+import functools
 import importlib.resources
 import logging
 import re
@@ -68,11 +69,12 @@ def extract_model_id(cpu_name: str) -> str | None:
 
 # ── CSV loading ──────────────────────────────────────────────────────────────
 
-def _load_bundled_csv() -> list[dict]:
-    """Load the bundled PassmarkCPUList.csv from package data."""
+@functools.lru_cache(maxsize=1)
+def _load_bundled_csv() -> tuple[dict, ...]:
+    """Load the bundled PassmarkCPUList.csv from package data (cached)."""
     ref = importlib.resources.files("inventory.data").joinpath("passmark.csv")
     text = ref.read_text(encoding="utf-8")
-    return list(csv.DictReader(StringIO(text)))
+    return tuple(csv.DictReader(StringIO(text)))
 
 
 def _parse_score(row: dict) -> int | None:
@@ -116,19 +118,14 @@ def lookup_csv(cpu_name: str) -> PassmarkResult | None:
             if score is not None:
                 candidates.append({"cpu": csv_cpu, "score": score})
 
-        if len(candidates) == 1:
-            log.info("Exact model match: %s", candidates[0]["cpu"])
-            return PassmarkResult(
-                score=candidates[0]["score"],
-                matched_cpu=candidates[0]["cpu"],
-                confidence=100,
-            )
-
         if candidates:
-            log.info(
-                "%d candidates for '%s' — picking best by fuzzy match.",
-                len(candidates), model_id,
-            )
+            if len(candidates) == 1:
+                log.info("Single candidate for '%s' — computing real confidence.", model_id)
+            else:
+                log.info(
+                    "%d candidates for '%s' — picking best by fuzzy match.",
+                    len(candidates), model_id,
+                )
             best = max(
                 candidates,
                 key=lambda c: fuzz.ratio(clean.lower(), c["cpu"].lower()),

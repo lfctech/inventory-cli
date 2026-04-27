@@ -11,8 +11,8 @@ Built with [`uv`](https://docs.astral.sh/uv/) and [`typer`](https://typer.tiango
 ### With `uvx` (no clone required)
 
 ```bash
-# Set API key (URL is now in config.toml [snipeit].url)
-export SNIPERIT_API_KEY="your-api-key"
+# Set API key (URL is in config.toml [snipeit].url)
+export SNIPEIT_API_KEY="your-api-key"
 export INVENTORY_CONFIG="/path/to/your/config.toml"
 
 # Run any command
@@ -58,7 +58,7 @@ No `.env` file loading. Credentials are resolved as follows:
 | Priority | Source |
 |----------|--------|
 | 1 | `--url` CLI flag |
-| 2 | `SNIPERIT_URL` environment variable |
+| 2 | `SNIPEIT_URL` environment variable |
 | 3 | `config.toml` → `[snipeit].url` |
 
 **API key** — two-tier resolution:
@@ -66,7 +66,7 @@ No `.env` file loading. Credentials are resolved as follows:
 | Priority | Source |
 |----------|--------|
 | 1 | `--api-key` CLI flag |
-| 2 | `SNIPERIT_API_KEY` environment variable |
+| 2 | `SNIPEIT_API_KEY` environment variable |
 
 Or pass both directly:
 
@@ -185,7 +185,7 @@ Tiers and bonuses are configurable in `config.toml`.
 ## ProcMan Integration
 
 ```powershell
-$env:SNIPERIT_API_KEY = $secrets.SnipeItKey
+$env:SNIPEIT_API_KEY = $secrets.SnipeItKey
 $env:INVENTORY_CONFIG = "$PSScriptRoot\inventory\config.toml"
 # URL is read from config.toml [snipeit].url
 

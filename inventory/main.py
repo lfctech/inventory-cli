@@ -43,14 +43,6 @@ class _State:
 state = _State()
 
 
-def get_config() -> AppConfig:
-    """Return the loaded config, raising if not initialized."""
-    if state.config is None:
-        console.print("[red]Error:[/red] No config loaded. This is a bug.")
-        raise typer.Exit(1)
-    return state.config
-
-
 # ── Root callback (global options) ────────────────────────────────────────────
 
 @app.callback()
@@ -58,14 +50,14 @@ def main(
     url: str | None = typer.Option(
         None,
         "--url",
-        envvar="SNIPERIT_URL",
+        envvar="SNIPEIT_URL",
         help="Snipe-IT instance URL.",
         show_default=False,
     ),
     api_key: str | None = typer.Option(
         None,
         "--api-key",
-        envvar="SNIPERIT_API_KEY",
+        envvar="SNIPEIT_API_KEY",
         help="Snipe-IT API key.",
         show_default=False,
     ),
