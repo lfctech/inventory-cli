@@ -28,12 +28,12 @@ url = "https://inventory.example.com"
 [custom_fields]
 # Maps CLI argument names -> Snipe-IT custom field db column names.
 # Update these to match your Snipe-IT instance's custom field keys.
-cpu_model     = "_snipeit_cpu_model_1"
-cpu_passmark  = "_snipeit_cpu_passmark_2"
-ram_gb        = "_snipeit_ram_gb_3"
-storage_gb    = "_snipeit_storage_gb_4"
-sale_price    = "_snipeit_sale_price_5"
-touch_screen  = "_snipeit_touch_screen_6"
+cpu_model     = "_snipeit_cpu_11"
+cpu_passmark  = "_snipeit_cpu_passmark_score_8"
+ram_gb        = "_snipeit_ram_9"
+storage_gb    = "_snipeit_storage_10"
+sale_price    = "_snipeit_sale_price_12"
+touch_screen  = "_snipeit_touchscreen_13"
 
 [pricing]
 # Points -> price tier table.
@@ -55,6 +55,7 @@ fuzzy_threshold = 80  # confidence % below which operator is prompted
 
 
 # ── Parsed config dataclasses ────────────────────────────────────────────────
+
 
 @dataclass
 class SnipeITConfig:
@@ -99,6 +100,7 @@ class AppConfig:
 
 
 # ── Resolution ────────────────────────────────────────────────────────────────
+
 
 def _xdg_config_path() -> Path:
     """Return the XDG config path for inventory."""
@@ -174,7 +176,9 @@ def load_config(config_path: Path) -> AppConfig:
         touch_screen=custom_fields_raw.get("touch_screen", "_snipeit_touch_screen_6"),
     )
 
-    tiers_raw = pricing_raw.get("tiers", [[6, 100], [10, 125], [14, 150], [18, 175], [24, 200], [999, 250]])
+    tiers_raw = pricing_raw.get(
+        "tiers", [[6, 100], [10, 125], [14, 150], [18, 175], [24, 200], [999, 250]]
+    )
     pricing = PricingConfig(
         tiers=_parse_tiers(tiers_raw),
         touch_screen_bonus=pricing_raw.get("touch_screen_bonus", 20),
