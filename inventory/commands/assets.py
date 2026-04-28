@@ -106,14 +106,24 @@ def _get_custom_field_value(asset: Any, field_key: str) -> str | None:
     raw = getattr(asset, "custom_fields", None)
     if not raw:
         return None
+    val = None
     if isinstance(raw, dict):
-        entry = raw.get(field_key)
-        if isinstance(entry, dict):
-            val = entry.get("value")
+        # SnipeIT returns custom fields keyed by human-readable names
+        # e.g. {"Sale Price": {"field": "_snipeit_sale_price_12", "value": "250"}}
+        for entry in raw.values():
+            if isinstance(entry, dict) and entry.get("field") == field_key:
+                val = entry.get("value")
+                break
         else:
-            val = entry
+            # Fallback if they are actually keyed by column name
+            entry = raw.get(field_key)
+            if isinstance(entry, dict):
+                val = entry.get("value")
+            else:
+                val = entry
     else:
         val = getattr(raw, field_key, None)
+        
     if val is None or str(val).strip() in ("", "None"):
         return None
     return str(val).strip()

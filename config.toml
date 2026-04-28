@@ -9,12 +9,12 @@ url = "https://inventory.lfctech.org"
 [custom_fields]
 # Maps CLI argument names -> Snipe-IT custom field db column names.
 # Update these to match your Snipe-IT instance's custom field keys.
-cpu_model     = "_snipeit_cpu_11"
-cpu_passmark  = "_snipeit_cpu_passmark_score_8"
-ram_gb        = "_snipeit_ram_gb_9"
-storage_gb    = "_snipeit_storage_gb_10"
-sale_price    = "_snipeit_sale_price_12"
-touch_screen  = "_snipeit_touchscreen_13"
+CPU Model     = "_snipeit_cpu_11"
+Passmark Score  = "_snipeit_cpu_passmark_score_8"
+RAM       = "_snipeit_ram_gb_9"
+Storage    = "_snipeit_storage_gb_10"
+Sale Price    = "_snipeit_sale_price_12"
+Touchscreen  = "_snipeit_touchscreen_13"
 
 [pricing]
 # Points -> price tier table.
