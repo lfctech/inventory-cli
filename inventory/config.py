@@ -153,8 +153,8 @@ def load_config(config_path: Path) -> AppConfig:
     try:
         with open(config_path, "rb") as f:
             raw: dict[str, Any] = tomllib.load(f)
-    except tomllib.TOMLDecodeError as exc:
-        raise ValueError(f"config.toml is invalid TOML: {exc}") from exc
+    except (tomllib.TOMLDecodeError, OSError) as exc:
+        raise ValueError(f"Could not load config.toml: {exc}") from exc
 
     snipeit_raw = raw.get("snipeit", {})
     custom_fields_raw = raw.get("custom_fields", {})

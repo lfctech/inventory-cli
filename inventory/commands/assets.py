@@ -14,6 +14,7 @@ from rich.table import Table
 from snipeit import SnipeIT
 from snipeit.exceptions import (
     SnipeITAuthenticationError,
+    SnipeITException,
     SnipeITNotFoundError,
     SnipeITServerError,
     SnipeITTimeoutError,
@@ -96,7 +97,7 @@ def _resolve_asset(
         else:
             assert serial is not None
             return client.assets.get_by_serial(serial)
-    except Exception as exc:
+    except SnipeITException as exc:
         _handle_api_error(exc)
 
 
@@ -273,7 +274,7 @@ def create(
 
     try:
         asset = client.assets.create(**payload)
-    except Exception as exc:
+    except SnipeITException as exc:
         _handle_api_error(exc)
 
     if state.json_output:
@@ -335,7 +336,7 @@ def update(
 
     try:
         updated = client.assets.patch(asset_id, **payload)
-    except Exception as exc:
+    except SnipeITException as exc:
         _handle_api_error(exc)
 
     if state.json_output:
@@ -517,7 +518,7 @@ def price(
         console.print(
             f"[green]✓[/green] Asset {asset_tag} updated — sale price: [bold]${breakdown.final_price}[/bold]"
         )
-    except Exception as exc:
+    except SnipeITException as exc:
         _handle_api_error(exc)
 
 
@@ -542,5 +543,5 @@ def label(
     try:
         save_path = client.assets.labels(output, [asset_tag])
         console.print(f"[green]✓[/green] Label saved to: {save_path}")
-    except Exception as exc:
+    except SnipeITException as exc:
         _handle_api_error(exc)
