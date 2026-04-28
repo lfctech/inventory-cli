@@ -30,8 +30,8 @@ url = "https://inventory.example.com"
 # Update these to match your Snipe-IT instance's custom field keys.
 cpu_model     = "_snipeit_cpu_11"
 cpu_passmark  = "_snipeit_cpu_passmark_score_8"
-ram_gb        = "_snipeit_ram_9"
-storage_gb    = "_snipeit_storage_10"
+ram_gb        = "_snipeit_ram_gb_9"
+storage_gb    = "_snipeit_storage_gb_10"
 sale_price    = "_snipeit_sale_price_12"
 touch_screen  = "_snipeit_touchscreen_13"
 
