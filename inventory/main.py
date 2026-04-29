@@ -131,5 +131,7 @@ def init(
 # ── Mount subcommand groups ──────────────────────────────────────────────────
 
 from .commands.assets import assets_app  # noqa: E402
+from .commands.models import models_app  # noqa: E402
 
 app.add_typer(assets_app, name="assets", help="Manage Snipe-IT assets.")
+app.add_typer(models_app, name="models", help="Manage Snipe-IT models.")

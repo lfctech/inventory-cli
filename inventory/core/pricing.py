@@ -19,9 +19,9 @@ class PriceBreakdown:
 
     passmark_score: int
     cpu_points: int
-    ram_gb: float
+    ram: float
     ram_points: int
-    storage_gb: float
+    storage: float
     storage_points: int
     is_desktop: bool
     desktop_adjustment: int
@@ -35,9 +35,9 @@ class PriceBreakdown:
         return {
             "passmark_score": self.passmark_score,
             "cpu_points": self.cpu_points,
-            "ram_gb": self.ram_gb,
+            "ram": self.ram,
             "ram_points": self.ram_points,
-            "storage_gb": self.storage_gb,
+            "storage": self.storage,
             "storage_points": self.storage_points,
             "is_desktop": self.is_desktop,
             "desktop_adjustment": self.desktop_adjustment,
@@ -54,18 +54,18 @@ def cpu_points(passmark_score: int) -> int:
     return round(passmark_score / 1000)
 
 
-def ram_points(ram_gb: float) -> int:
-    if ram_gb >= 32:
+def ram_points(ram: float) -> int:
+    if ram >= 32:
         return 10
-    if ram_gb >= 16:
+    if ram >= 16:
         return 3
     return 0
 
 
-def storage_points(storage_gb: float) -> int:
-    if storage_gb >= 512:
+def storage_points(storage: float) -> int:
+    if storage >= 512:
         return 4
-    if storage_gb >= 256:
+    if storage >= 256:
         return 2
     return 0
 
@@ -86,8 +86,8 @@ def price_from_points(total_points: int, tiers: list[PricingTier]) -> int:
 
 def calculate_price(
     passmark_score: int,
-    ram_gb: float,
-    storage_gb: float,
+    ram: float,
+    storage: float,
     config: PricingConfig,
     is_desktop: bool = False,
     has_touch: bool = False,
@@ -97,8 +97,8 @@ def calculate_price(
     Returns a PriceBreakdown with all intermediate values for display.
     """
     c_pts = cpu_points(passmark_score)
-    r_pts = ram_points(ram_gb)
-    s_pts = storage_points(storage_gb)
+    r_pts = ram_points(ram)
+    s_pts = storage_points(storage)
     d_adj = -config.desktop_penalty if is_desktop else 0
     total = c_pts + r_pts + s_pts + d_adj
     base = price_from_points(total, config.tiers)
@@ -108,9 +108,9 @@ def calculate_price(
     return PriceBreakdown(
         passmark_score=passmark_score,
         cpu_points=c_pts,
-        ram_gb=ram_gb,
+        ram=ram,
         ram_points=r_pts,
-        storage_gb=storage_gb,
+        storage=storage,
         storage_points=s_pts,
         is_desktop=is_desktop,
         desktop_adjustment=d_adj,

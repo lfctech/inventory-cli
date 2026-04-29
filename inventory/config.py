@@ -30,8 +30,8 @@ url = "https://inventory.example.com"
 # Update these to match your Snipe-IT instance's custom field keys.
 cpu_model     = "_snipeit_cpu_11"
 cpu_passmark  = "_snipeit_cpu_passmark_score_8"
-ram_gb        = "_snipeit_ram_gb_9"
-storage_gb    = "_snipeit_storage_gb_10"
+ram           = "_snipeit_ram_gb_9"
+storage       = "_snipeit_storage_gb_10"
 sale_price    = "_snipeit_sale_price_12"
 touch_screen  = "_snipeit_touchscreen_13"
 
@@ -66,8 +66,8 @@ class SnipeITConfig:
 class CustomFieldsConfig:
     cpu_model: str = "_snipeit_cpu_model_1"
     cpu_passmark: str = "_snipeit_cpu_passmark_2"
-    ram_gb: str = "_snipeit_ram_gb_3"
-    storage_gb: str = "_snipeit_storage_gb_4"
+    ram: str = "_snipeit_ram_gb_3"
+    storage: str = "_snipeit_storage_gb_4"
     sale_price: str = "_snipeit_sale_price_5"
     touch_screen: str = "_snipeit_touch_screen_6"
 
@@ -170,8 +170,8 @@ def load_config(config_path: Path) -> AppConfig:
     custom_fields = CustomFieldsConfig(
         cpu_model=custom_fields_raw.get("cpu_model", "_snipeit_cpu_model_1"),
         cpu_passmark=custom_fields_raw.get("cpu_passmark", "_snipeit_cpu_passmark_2"),
-        ram_gb=custom_fields_raw.get("ram_gb", "_snipeit_ram_gb_3"),
-        storage_gb=custom_fields_raw.get("storage_gb", "_snipeit_storage_gb_4"),
+        ram=custom_fields_raw.get("ram", "_snipeit_ram_gb_3"),
+        storage=custom_fields_raw.get("storage", "_snipeit_storage_gb_4"),
         sale_price=custom_fields_raw.get("sale_price", "_snipeit_sale_price_5"),
         touch_screen=custom_fields_raw.get("touch_screen", "_snipeit_touch_screen_6"),
     )

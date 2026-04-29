@@ -6,27 +6,20 @@ inventory.commands.assets
 
 from __future__ import annotations
 
-from typing import Any, NoReturn
+from typing import Any
 
 import typer
 from rich.console import Console
 from rich.table import Table
 from snipeit import SnipeIT
-from snipeit.exceptions import (
-    SnipeITAuthenticationError,
-    SnipeITException,
-    SnipeITNotFoundError,
-    SnipeITServerError,
-    SnipeITTimeoutError,
-    SnipeITValidationError,
-)
+from snipeit.exceptions import SnipeITException
 
-from ..client import make_client
 from ..config import AppConfig
 from ..core.passmark import get_average_score, lookup_csv
 from ..core.pricing import calculate_price, is_desktop_category
 from ..core.resolvers import resolve_model, resolve_status_label
 from ..main import state
+from ._common import get_client, handle_api_error
 
 console = Console(stderr=True)
 out = Console()  # stdout for data output
@@ -50,28 +43,7 @@ def _require_config() -> AppConfig:
 
 def _get_client() -> SnipeIT:
     """Create a SnipeIT client, exiting with a clear error on failure."""
-    try:
-        return make_client(state.url, state.api_key)
-    except ValueError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1) from None
-
-
-def _handle_api_error(exc: Exception) -> NoReturn:
-    """Print a user-friendly error and exit."""
-    if isinstance(exc, SnipeITAuthenticationError):
-        console.print("[red]Error:[/red] Authentication failed. Check your API key.")
-    elif isinstance(exc, SnipeITNotFoundError):
-        console.print("[red]Error:[/red] Asset not found.")
-    elif isinstance(exc, SnipeITValidationError):
-        console.print(f"[red]Error:[/red] Validation failed — {exc}")
-    elif isinstance(exc, SnipeITServerError):
-        console.print("[red]Error:[/red] Snipe-IT server error. Try again later.")
-    elif isinstance(exc, SnipeITTimeoutError):
-        console.print("[red]Error:[/red] Request timed out.")
-    else:
-        console.print(f"[red]Error:[/red] {exc}")
-    raise typer.Exit(1)
+    return get_client()
 
 
 def _resolve_asset(
@@ -98,7 +70,7 @@ def _resolve_asset(
             assert serial is not None
             return client.assets.get_by_serial(serial)
     except SnipeITException as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc, entity="Asset")
 
 
 def _get_custom_field_value(asset: Any, field_key: str) -> str | None:
@@ -159,10 +131,10 @@ def _asset_table(asset: Any, cfg: AppConfig) -> Table:
     passmark = _get_custom_field_value(asset, cfg.custom_fields.cpu_passmark) or ""
     table.add_row("PassMark", passmark)
 
-    ram = _get_custom_field_value(asset, cfg.custom_fields.ram_gb) or ""
+    ram = _get_custom_field_value(asset, cfg.custom_fields.ram) or ""
     table.add_row("RAM", f"{ram} GB" if ram else "")
 
-    storage = _get_custom_field_value(asset, cfg.custom_fields.storage_gb) or ""
+    storage = _get_custom_field_value(asset, cfg.custom_fields.storage) or ""
     table.add_row("Storage", f"{storage} GB" if storage else "")
 
     touch_raw = _get_custom_field_value(asset, cfg.custom_fields.touch_screen) or ""
@@ -199,8 +171,8 @@ def _asset_dict(asset: Any, cfg: AppConfig) -> dict:
         "category": category.get("name") if isinstance(category, dict) else str(category or ""),
         "cpu": _get_custom_field_value(asset, cfg.custom_fields.cpu_model),
         "passmark": _get_custom_field_value(asset, cfg.custom_fields.cpu_passmark),
-        "ram_gb": _get_custom_field_value(asset, cfg.custom_fields.ram_gb),
-        "storage_gb": _get_custom_field_value(asset, cfg.custom_fields.storage_gb),
+        "ram": _get_custom_field_value(asset, cfg.custom_fields.ram),
+        "storage": _get_custom_field_value(asset, cfg.custom_fields.storage),
         "touch_screen": _get_custom_field_value(asset, cfg.custom_fields.touch_screen),
         "sale_price": _get_custom_field_value(asset, cfg.custom_fields.sale_price),
     }
@@ -220,9 +192,9 @@ def _build_custom_fields(
     if cpu is not None:
         fields[cfg.custom_fields.cpu_model] = cpu
     if ram is not None:
-        fields[cfg.custom_fields.ram_gb] = str(ram)
+        fields[cfg.custom_fields.ram] = str(ram)
     if storage is not None:
-        fields[cfg.custom_fields.storage_gb] = str(storage)
+        fields[cfg.custom_fields.storage] = str(storage)
     if touch_screen is not None:
         fields[cfg.custom_fields.touch_screen] = "1" if touch_screen else "0"
     if passmark is not None:
@@ -294,10 +266,12 @@ def create(
 
     try:
         created_asset = client.assets.create(**payload)
-        assert created_asset.id is not None
+        if created_asset.id is None:
+            console.print("[red]Error:[/red] Asset was created but the server returned no ID.")
+            raise typer.Exit(1)
         asset = client.assets.get(int(created_asset.id))
     except SnipeITException as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc, entity="Asset")
 
     if state.json_output:
         out.print_json(data=_asset_dict(asset, cfg))
@@ -360,7 +334,7 @@ def update(
         client.assets.patch(asset_id, **payload)
         updated = client.assets.get(asset_id)
     except SnipeITException as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc, entity="Asset")
 
     if state.json_output:
         out.print_json(data=_asset_dict(updated, cfg))
@@ -391,12 +365,12 @@ def price(
     # ── Resolve specs from asset or overrides ─────────────────────────────
     # RAM
     if ram_override is not None:
-        ram_gb = float(ram_override)
+        ram = float(ram_override)
     else:
-        raw = _get_custom_field_value(asset, cfg.custom_fields.ram_gb)
+        raw = _get_custom_field_value(asset, cfg.custom_fields.ram)
         if raw:
             try:
-                ram_gb = float(raw)
+                ram = float(raw)
             except ValueError:
                 console.print(f"[red]Error:[/red] Cannot parse RAM value '{raw}' from asset. Pass --ram.")
                 raise typer.Exit(1) from None
@@ -406,12 +380,12 @@ def price(
 
     # Storage
     if storage_override is not None:
-        storage_gb = float(storage_override)
+        storage = float(storage_override)
     else:
-        raw = _get_custom_field_value(asset, cfg.custom_fields.storage_gb)
+        raw = _get_custom_field_value(asset, cfg.custom_fields.storage)
         if raw:
             try:
-                storage_gb = float(raw)
+                storage = float(raw)
             except ValueError:
                 console.print(f"[red]Error:[/red] Cannot parse storage value '{raw}' from asset. Pass --storage.")
                 raise typer.Exit(1) from None
@@ -488,8 +462,8 @@ def price(
     # ── Calculate ─────────────────────────────────────────────────────────
     breakdown = calculate_price(
         passmark_score=passmark_score,
-        ram_gb=ram_gb,
-        storage_gb=storage_gb,
+        ram=ram,
+        storage=storage,
         config=cfg.pricing,
         is_desktop=is_desktop,
         has_touch=has_touch,
@@ -512,8 +486,8 @@ def price(
         table.add_column("Points", justify="right")
 
         table.add_row("CPU PassMark", str(breakdown.passmark_score), str(breakdown.cpu_points))
-        table.add_row("RAM", f"{breakdown.ram_gb} GB", str(breakdown.ram_points))
-        table.add_row("Storage", f"{breakdown.storage_gb} GB", str(breakdown.storage_points))
+        table.add_row("RAM", f"{breakdown.ram} GB", str(breakdown.ram_points))
+        table.add_row("Storage", f"{breakdown.storage} GB", str(breakdown.storage_points))
         if breakdown.is_desktop:
             table.add_row("Desktop Penalty", "", str(breakdown.desktop_adjustment))
         table.add_row("", "", "───")
@@ -542,7 +516,7 @@ def price(
             f"[green]✓[/green] Asset {asset_tag} updated — sale price: [bold]${breakdown.final_price}[/bold]"
         )
     except SnipeITException as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc, entity="Asset")
 
 
 @assets_app.command()
@@ -567,7 +541,7 @@ def label(
         save_path = client.assets.labels(output, [asset_tag])
         console.print(f"[green]✓[/green] Label saved to: {save_path}")
     except SnipeITException as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc, entity="Asset")
 
 
 # ── Files Commands ────────────────────────────────────────────────────────────
@@ -592,7 +566,7 @@ def list_files(
     try:
         response = client.assets.list_files(asset_id)
     except SnipeITException as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc, entity="Asset")
 
     if state.json_output:
         out.print_json(data=response)
@@ -665,7 +639,7 @@ def upload_file(
     try:
         response = client.assets.upload_files(asset_id, paths, notes=notes)
     except SnipeITException as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc, entity="Asset")
 
     if state.json_output:
         out.print_json(data=response)
@@ -711,7 +685,7 @@ def download_file(
     try:
         final_path = client.assets.download_file(asset_id, file_id, save_path)
     except SnipeITException as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc, entity="Asset")
 
     if state.json_output:
         out.print_json(data={"status": "success", "saved_to": final_path})
@@ -743,7 +717,7 @@ def delete_file(
     try:
         client.assets.delete_file(asset_id, file_id)
     except SnipeITException as exc:
-        _handle_api_error(exc)
+        handle_api_error(exc, entity="Asset")
 
     if state.json_output:
         out.print_json(data={"status": "success"})

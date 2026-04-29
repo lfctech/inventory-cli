@@ -1,7 +1,7 @@
 """
 inventory.core.resolvers
 ========================
-Name → ID resolution for Snipe-IT models and status labels.
+Name → ID resolution for Snipe-IT resources (models, status labels, categories, manufacturers).
 Pure API lookup — no CLI coupling.
 """
 
@@ -70,3 +70,21 @@ def resolve_status_label(client: SnipeIT, name: str) -> int:
     Raises ValueError if no exact match or multiple ambiguous matches.
     """
     return _resolve_by_name(client.status_labels, name, "Status label")
+
+
+def resolve_category(client: SnipeIT, name: str) -> int:
+    """
+    Resolve a category name to its Snipe-IT ID.
+
+    Raises ValueError if no exact match or multiple ambiguous matches.
+    """
+    return _resolve_by_name(client.categories, name, "Category")
+
+
+def resolve_manufacturer(client: SnipeIT, name: str) -> int:
+    """
+    Resolve a manufacturer name to its Snipe-IT ID.
+
+    Raises ValueError if no exact match or multiple ambiguous matches.
+    """
+    return _resolve_by_name(client.manufacturers, name, "Manufacturer")
