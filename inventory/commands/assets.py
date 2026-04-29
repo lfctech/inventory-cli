@@ -123,7 +123,7 @@ def _get_custom_field_value(asset: Any, field_key: str) -> str | None:
                 val = entry
     else:
         val = getattr(raw, field_key, None)
-        
+
     if val is None or str(val).strip() in ("", "None"):
         return None
     return str(val).strip()
@@ -283,7 +283,9 @@ def create(
     payload.update(_build_custom_fields(cfg, cpu=cpu, ram=ram, storage=storage, touch_screen=touch_screen, passmark=passmark))
 
     try:
-        asset = client.assets.create(**payload)
+        created_asset = client.assets.create(**payload)
+        assert created_asset.id is not None
+        asset = client.assets.get(int(created_asset.id))
     except SnipeITException as exc:
         _handle_api_error(exc)
 
@@ -345,7 +347,8 @@ def update(
         raise typer.Exit(0)
 
     try:
-        updated = client.assets.patch(asset_id, **payload)
+        client.assets.patch(asset_id, **payload)
+        updated = client.assets.get(asset_id)
     except SnipeITException as exc:
         _handle_api_error(exc)
 
