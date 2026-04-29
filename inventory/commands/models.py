@@ -14,7 +14,7 @@ from rich.table import Table
 from snipeit import SnipeIT
 from snipeit.exceptions import SnipeITException
 
-from ..core.resolvers import resolve_category, resolve_manufacturer, resolve_model
+from ..core.resolvers import resolve_category, resolve_fieldset, resolve_manufacturer, resolve_model
 from ..main import state
 from ._common import get_client, handle_api_error
 
@@ -24,8 +24,6 @@ out = Console()
 models_app = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
 
 
-def _get_client() -> SnipeIT:
-    return get_client()
 
 
 def _resolve_target_model(client: SnipeIT, model_id: int | None, name: str | None) -> Any:
@@ -51,15 +49,21 @@ def _resolve_target_model(client: SnipeIT, model_id: int | None, name: str | Non
         raise typer.Exit(1) from None
 
 
+def _extract_name(field: Any) -> str:
+    """Extract the name string from a Snipe-IT nested object or plain value."""
+    if isinstance(field, dict):
+        return field.get("name", "") or ""
+    return str(field or "")
+
+
 def _model_dict(model: Any) -> dict:
-    manufacturer = getattr(model, "manufacturer", None)
-    category = getattr(model, "category", None)
     return {
         "id": getattr(model, "id", None),
         "name": getattr(model, "name", None),
         "model_number": getattr(model, "model_number", None),
-        "manufacturer": manufacturer.get("name") if isinstance(manufacturer, dict) else str(manufacturer or ""),
-        "category": category.get("name") if isinstance(category, dict) else str(category or ""),
+        "manufacturer": _extract_name(getattr(model, "manufacturer", None)),
+        "category": _extract_name(getattr(model, "category", None)),
+        "fieldset": _extract_name(getattr(model, "fieldset", None)),
         "notes": getattr(model, "notes", None),
     }
 
@@ -72,15 +76,9 @@ def _model_table(model: Any) -> Table:
     table.add_row("ID", str(getattr(model, "id", "")))
     table.add_row("Name", str(getattr(model, "name", "") or ""))
     table.add_row("Model Number", str(getattr(model, "model_number", "") or ""))
-
-    manufacturer = getattr(model, "manufacturer", None)
-    mfg_name = manufacturer.get("name", "") if isinstance(manufacturer, dict) else str(manufacturer or "")
-    table.add_row("Manufacturer", mfg_name)
-
-    category = getattr(model, "category", None)
-    cat_name = category.get("name", "") if isinstance(category, dict) else str(category or "")
-    table.add_row("Category", cat_name)
-
+    table.add_row("Manufacturer", _extract_name(getattr(model, "manufacturer", None)))
+    table.add_row("Category", _extract_name(getattr(model, "category", None)))
+    table.add_row("Fieldset", _extract_name(getattr(model, "fieldset", None)))
     table.add_row("Notes", str(getattr(model, "notes", "") or ""))
 
     return table
@@ -92,7 +90,7 @@ def get_model(
     name: str | None = typer.Option(None, "--name", help="Model name."),
 ) -> None:
     """Fetch and display a single model."""
-    client = _get_client()
+    client = get_client()
     model = _resolve_target_model(client, id, name)
 
     if state.json_output:
@@ -107,7 +105,7 @@ def list_models(
     limit: int = typer.Option(50, "--limit", help="Maximum number of models to return."),
 ) -> None:
     """List models."""
-    client = _get_client()
+    client = get_client()
     try:
         results = client.models.list(search=search, limit=limit)
     except SnipeITException as exc:
@@ -129,17 +127,12 @@ def list_models(
     table.add_column("Category")
 
     for m in results:
-        manufacturer = getattr(m, "manufacturer", None)
-        mfg_name = manufacturer.get("name", "") if isinstance(manufacturer, dict) else str(manufacturer or "")
-        category = getattr(m, "category", None)
-        cat_name = category.get("name", "") if isinstance(category, dict) else str(category or "")
-
         table.add_row(
             str(getattr(m, "id", "")),
             str(getattr(m, "name", "") or ""),
             str(getattr(m, "model_number", "") or ""),
-            mfg_name,
-            cat_name,
+            _extract_name(getattr(m, "manufacturer", None)),
+            _extract_name(getattr(m, "category", None)),
         )
     out.print(table)
 
@@ -149,15 +142,17 @@ def create_model(
     name: str = typer.Option(..., "--name", help="Model name."),
     category: str = typer.Option(..., "--category", help="Category name (resolved to ID via API)."),
     manufacturer: str = typer.Option(..., "--manufacturer", help="Manufacturer name (resolved to ID via API)."),
+    fieldset: str | None = typer.Option(None, "--fieldset", help="Fieldset name (resolved to ID via API)."),
     model_number: str | None = typer.Option(None, "--model-number", help="Model number."),
     notes: str | None = typer.Option(None, "--notes", help="Notes."),
 ) -> None:
     """Create a new model in Snipe-IT."""
-    client = _get_client()
+    client = get_client()
 
     try:
         cat_id = resolve_category(client, category)
         mfg_id = resolve_manufacturer(client, manufacturer)
+        fs_id = resolve_fieldset(client, fieldset) if fieldset is not None else None
     except ValueError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
@@ -167,6 +162,8 @@ def create_model(
         "category_id": cat_id,
         "manufacturer_id": mfg_id,
     }
+    if fs_id is not None:
+        payload["fieldset_id"] = fs_id
     if model_number is not None:
         payload["model_number"] = model_number
     if notes is not None:
@@ -195,11 +192,12 @@ def update_model(
     new_name: str | None = typer.Option(None, "--new-name", help="New model name."),
     category: str | None = typer.Option(None, "--category", help="Category name (resolved to ID via API)."),
     manufacturer: str | None = typer.Option(None, "--manufacturer", help="Manufacturer name (resolved to ID via API)."),
+    fieldset: str | None = typer.Option(None, "--fieldset", help="Fieldset name (resolved to ID via API)."),
     model_number: str | None = typer.Option(None, "--model-number", help="Model number."),
     notes: str | None = typer.Option(None, "--notes", help="Notes."),
 ) -> None:
     """Update one or more fields on an existing model."""
-    client = _get_client()
+    client = get_client()
     target = _resolve_target_model(client, id, name)
     model_id = target.id
 
@@ -215,6 +213,12 @@ def update_model(
     if manufacturer is not None:
         try:
             payload["manufacturer_id"] = resolve_manufacturer(client, manufacturer)
+        except ValueError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            raise typer.Exit(1) from None
+    if fieldset is not None:
+        try:
+            payload["fieldset_id"] = resolve_fieldset(client, fieldset)
         except ValueError as exc:
             console.print(f"[red]Error:[/red] {exc}")
             raise typer.Exit(1) from None
@@ -247,7 +251,7 @@ def delete_model(
     force: bool = typer.Option(False, "--force", "-f", help="Do not prompt for confirmation."),
 ) -> None:
     """Delete a model."""
-    client = _get_client()
+    client = get_client()
     target = _resolve_target_model(client, id, name)
     model_id = target.id
 

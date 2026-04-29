@@ -80,7 +80,11 @@ def main(
     state.json_output = json_output
 
     # Resolve and load config
-    resolved = resolve_config_path(config_path)
+    try:
+        resolved = resolve_config_path(config_path)
+    except ValueError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
     if resolved is None:
         # The `init` command doesn't need config — skip loading
         # We check for it inside commands that need it

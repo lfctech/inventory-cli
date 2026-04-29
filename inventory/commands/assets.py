@@ -41,10 +41,6 @@ def _require_config() -> AppConfig:
     return cfg
 
 
-def _get_client() -> SnipeIT:
-    """Create a SnipeIT client, exiting with a clear error on failure."""
-    return get_client()
-
 
 def _resolve_asset(
     client: SnipeIT,
@@ -214,7 +210,7 @@ def get(
 ) -> None:
     """Fetch and display a single asset."""
     cfg = _require_config()
-    client = _get_client()
+    client = get_client()
 
     asset = _resolve_asset(client, id, tag, serial)
 
@@ -239,7 +235,7 @@ def create(
 ) -> None:
     """Create a new asset in Snipe-IT."""
     cfg = _require_config()
-    client = _get_client()
+    client = get_client()
 
     # Resolve model and status names to IDs
     try:
@@ -297,7 +293,7 @@ def update(
 ) -> None:
     """Update one or more fields on an existing asset."""
     cfg = _require_config()
-    client = _get_client()
+    client = get_client()
 
     asset = _resolve_asset(client, id, tag, serial)
     asset_id = asset.id
@@ -356,7 +352,7 @@ def price(
 ) -> None:
     """Calculate the sale price and write it to the asset."""
     cfg = _require_config()
-    client = _get_client()
+    client = get_client()
 
     asset = _resolve_asset(client, id, tag, serial)
     asset_id = asset.id
@@ -528,7 +524,7 @@ def label(
 ) -> None:
     """Generate and save the label PDF for an asset."""
     _require_config()
-    client = _get_client()
+    client = get_client()
 
     asset = _resolve_asset(client, id, tag, serial)
     asset_tag = getattr(asset, "asset_tag", None)
@@ -558,7 +554,7 @@ def list_files(
 ) -> None:
     """List all files attached to an asset."""
     _require_config()
-    client = _get_client()
+    client = get_client()
 
     asset = _resolve_asset(client, id, tag, serial)
     asset_id = asset.id
@@ -626,7 +622,7 @@ def upload_file(
     """Upload one or more files to an asset."""
     import os
     _require_config()
-    client = _get_client()
+    client = get_client()
 
     for p in paths:
         if not os.path.isfile(p):
@@ -657,7 +653,7 @@ def download_file(
 ) -> None:
     """Download a file from an asset."""
     _require_config()
-    client = _get_client()
+    client = get_client()
 
     asset = _resolve_asset(client, id, tag, serial)
     asset_id = asset.id
@@ -677,8 +673,8 @@ def download_file(
                     if orig:
                         save_path = f"./{orig}"
                     break
-        except Exception:
-            pass
+        except Exception as exc:
+            console.print(f"[dim]Note: could not resolve original filename ({exc})[/dim]")
         if not save_path:
             save_path = f"./{file_id}_download"
 
@@ -703,7 +699,7 @@ def delete_file(
 ) -> None:
     """Delete a file from an asset."""
     _require_config()
-    client = _get_client()
+    client = get_client()
 
     asset = _resolve_asset(client, id, tag, serial)
     asset_id = asset.id

@@ -64,12 +64,12 @@ class SnipeITConfig:
 
 @dataclass
 class CustomFieldsConfig:
-    cpu_model: str = "_snipeit_cpu_model_1"
-    cpu_passmark: str = "_snipeit_cpu_passmark_2"
-    ram: str = "_snipeit_ram_gb_3"
-    storage: str = "_snipeit_storage_gb_4"
-    sale_price: str = "_snipeit_sale_price_5"
-    touch_screen: str = "_snipeit_touch_screen_6"
+    cpu_model: str = "_snipeit_cpu_11"
+    cpu_passmark: str = "_snipeit_cpu_passmark_score_8"
+    ram: str = "_snipeit_ram_gb_9"
+    storage: str = "_snipeit_storage_gb_10"
+    sale_price: str = "_snipeit_sale_price_12"
+    touch_screen: str = "_snipeit_touchscreen_13"
 
 
 @dataclass
@@ -113,14 +113,19 @@ def _xdg_config_path() -> Path:
 def resolve_config_path(cli_flag: str | None = None) -> Path | None:
     """
     Resolve the config.toml path using the three-tier fallback chain.
-    Returns None if no config file is found.
+
+    Raises ValueError if an explicit path (--config or INVENTORY_CONFIG) is
+    given but the file does not exist — the caller specified a path and
+    getting a silent miss would produce a confusing follow-on error.
+
+    Returns None only when no config is found via the implicit XDG fallback.
     """
     # Priority 1: explicit CLI flag
     if cli_flag:
         p = Path(cli_flag).expanduser().resolve()
         if p.is_file():
             return p
-        return None
+        raise ValueError(f"Config file not found: {p}")
 
     # Priority 2: environment variable
     env_path = os.environ.get("INVENTORY_CONFIG")
@@ -128,9 +133,9 @@ def resolve_config_path(cli_flag: str | None = None) -> Path | None:
         p = Path(env_path).expanduser().resolve()
         if p.is_file():
             return p
-        return None
+        raise ValueError(f"Config file not found (INVENTORY_CONFIG={env_path}): {p}")
 
-    # Priority 3: XDG config dir
+    # Priority 3: XDG config dir — optional, absence is not an error
     xdg = _xdg_config_path()
     if xdg.is_file():
         return xdg
@@ -167,13 +172,14 @@ def load_config(config_path: Path) -> AppConfig:
         url=snipeit_raw.get("url"),
     )
 
+    defaults = CustomFieldsConfig()
     custom_fields = CustomFieldsConfig(
-        cpu_model=custom_fields_raw.get("cpu_model", "_snipeit_cpu_model_1"),
-        cpu_passmark=custom_fields_raw.get("cpu_passmark", "_snipeit_cpu_passmark_2"),
-        ram=custom_fields_raw.get("ram", "_snipeit_ram_gb_3"),
-        storage=custom_fields_raw.get("storage", "_snipeit_storage_gb_4"),
-        sale_price=custom_fields_raw.get("sale_price", "_snipeit_sale_price_5"),
-        touch_screen=custom_fields_raw.get("touch_screen", "_snipeit_touch_screen_6"),
+        cpu_model=custom_fields_raw.get("cpu_model", defaults.cpu_model),
+        cpu_passmark=custom_fields_raw.get("cpu_passmark", defaults.cpu_passmark),
+        ram=custom_fields_raw.get("ram", defaults.ram),
+        storage=custom_fields_raw.get("storage", defaults.storage),
+        sale_price=custom_fields_raw.get("sale_price", defaults.sale_price),
+        touch_screen=custom_fields_raw.get("touch_screen", defaults.touch_screen),
     )
 
     tiers_raw = pricing_raw.get(

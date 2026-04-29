@@ -1,6 +1,5 @@
 # Default configuration for inventory CLI.
 # Generate this file with: inventory init
-# See PLAN.md for full schema documentation.
 
 [snipeit]
 # Snipe-IT instance URL. Can also be set via SNIPEIT_URL env var or --url flag.
@@ -10,15 +9,15 @@ url = "https://inventory.lfctech.org"
 # Maps CLI argument names -> Snipe-IT custom field db column names.
 # Update these to match your Snipe-IT instance's custom field keys.
 cpu_model     = "_snipeit_cpu_11"
-cpu_passmark = "_snipeit_cpu_passmark_score_8"
-ram       = "_snipeit_ram_gb_9"
-storage    = "_snipeit_storage_gb_10"
+cpu_passmark  = "_snipeit_cpu_passmark_score_8"
+ram           = "_snipeit_ram_gb_9"
+storage       = "_snipeit_storage_gb_10"
 sale_price    = "_snipeit_sale_price_12"
 touch_screen  = "_snipeit_touchscreen_13"
 
 [pricing]
 # Points -> price tier table.
-# Each entry is [min_points, price_usd]. Evaluated top-down; first match wins.
+# Each entry is [max_points, price_usd]. First tier where points <= max_points wins.
 tiers = [
     [6,  100],
     [10, 125],

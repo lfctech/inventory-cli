@@ -88,3 +88,12 @@ def resolve_manufacturer(client: SnipeIT, name: str) -> int:
     Raises ValueError if no exact match or multiple ambiguous matches.
     """
     return _resolve_by_name(client.manufacturers, name, "Manufacturer")
+
+
+def resolve_fieldset(client: SnipeIT, name: str) -> int:
+    """
+    Resolve a fieldset name to its Snipe-IT ID.
+
+    Raises ValueError if no exact match or multiple ambiguous matches.
+    """
+    return _resolve_by_name(client.fieldsets, name, "Fieldset")

@@ -81,12 +81,23 @@ inventory --url https://... --api-key token123 assets get --tag LFC-1042
 ```
 inventory
 ├── init                     Write a starter config.toml
-└── assets
-    ├── get                  Fetch and display an asset
-    ├── create               Create a new asset
-    ├── update               Update fields on an existing asset
-    ├── price                Calculate and set the sale price
-    └── label                Download the label PDF
+├── assets                   Manage Snipe-IT assets
+│   ├── get                  Fetch and display an asset
+│   ├── create               Create a new asset
+│   ├── update               Update fields on an existing asset
+│   ├── price                Calculate and set the sale price
+│   ├── label                Generate and save the label PDF for an asset
+│   └── files                Manage files attached to an asset
+│       ├── list             List all files attached to an asset
+│       ├── upload           Upload one or more files to an asset
+│       ├── download         Download a file from an asset
+│       └── delete           Delete a file from an asset
+└── models                   Manage Snipe-IT models
+    ├── get                  Fetch and display a single model
+    ├── list                 List models
+    ├── create               Create a new model in Snipe-IT
+    ├── update               Update one or more fields on an existing model
+    └── delete               Delete a model
 ```
 
 ### Lookup flags (available on all `assets` commands)
@@ -136,6 +147,41 @@ inventory assets price --tag LFC-1042 --dry-run
 inventory assets label --tag LFC-1042 --output ./LFC-1042.pdf
 ```
 
+### `inventory assets files`
+
+```bash
+# List files attached to an asset
+inventory assets files list --tag LFC-1042
+
+# Upload files to an asset
+inventory assets files upload report.pdf diagram.png --tag LFC-1042 --notes "Initial intake"
+
+# Download a file from an asset
+inventory assets files download --file-id 14 --tag LFC-1042 --output ./report-downloaded.pdf
+
+# Delete a file
+inventory assets files delete --file-id 14 --tag LFC-1042 --force
+```
+
+### `inventory models`
+
+```bash
+# List models
+inventory models list --limit 10
+
+# Get a specific model
+inventory models get --id 4
+
+# Create a model
+inventory models create --name "Latitude 7420" --category "Laptops" --manufacturer "Dell" --fieldset "Laptop Specs"
+
+# Update a model
+inventory models update --id 4 --model-number "L7420"
+
+# Delete a model
+inventory models delete --id 4 --force
+```
+
 ### JSON output
 
 All commands support `--json` for machine-readable output:
@@ -159,14 +205,14 @@ Points are calculated from hardware specs, then mapped to a price tier:
 | Storage ≥ 512 GB | +4 points |
 | Desktop category | −3 points |
 
-| Min Points | Price |
+| Max Points | Price |
 |------------|-------|
-| 0 | $100 |
-| 7 | $125 |
-| 11 | $150 |
-| 15 | $175 |
-| 19 | $200 |
-| 25 | $250 |
+| 6  | $100 |
+| 10 | $125 |
+| 14 | $150 |
+| 18 | $175 |
+| 24 | $200 |
+| 999 | $250 |
 
 **Touch screen bonus:** +$20
 
