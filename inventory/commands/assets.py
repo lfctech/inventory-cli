@@ -568,3 +568,185 @@ def label(
         console.print(f"[green]✓[/green] Label saved to: {save_path}")
     except SnipeITException as exc:
         _handle_api_error(exc)
+
+
+# ── Files Commands ────────────────────────────────────────────────────────────
+
+files_app = typer.Typer(no_args_is_help=True, rich_markup_mode="rich", help="Manage files attached to an asset.")
+assets_app.add_typer(files_app, name="files")
+
+
+@files_app.command("list")
+def list_files(
+    id: int | None = typer.Option(None, "--id", help="Asset ID."),
+    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
+    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
+) -> None:
+    """List all files attached to an asset."""
+    _require_config()
+    client = _get_client()
+
+    asset = _resolve_asset(client, id, tag, serial)
+    asset_id = asset.id
+
+    try:
+        response = client.assets.list_files(asset_id)
+    except SnipeITException as exc:
+        _handle_api_error(exc)
+
+    if state.json_output:
+        out.print_json(data=response)
+        return
+
+    # Try to extract the list of files from standard Snipe-IT envelopes
+    items = []
+    if isinstance(response, dict):
+        if "rows" in response:
+            items = response["rows"]
+        elif "files" in response:
+            items = response["files"]
+        elif "data" in response:
+            items = response["data"]
+        else:
+            items = [response]
+    elif isinstance(response, list):
+        items = response
+
+    if not items:
+        console.print(f"[yellow]No files found for asset {asset_id}.[/yellow]")
+        return
+
+    table = Table(title=f"Files for Asset {asset_id}", show_header=True, header_style="bold cyan")
+    table.add_column("File ID", style="bold")
+    table.add_column("Filename")
+    table.add_column("Created At")
+    table.add_column("Notes")
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        f_id = str(item.get("id", ""))
+        f_name = str(item.get("filename", "") or item.get("name", ""))
+        c_at = ""
+        cat_obj = item.get("created_at")
+        if isinstance(cat_obj, dict):
+            c_at = str(cat_obj.get("formatted", cat_obj.get("datetime", "")))
+        else:
+            c_at = str(cat_obj or "")
+
+        notes = str(item.get("notes", "") or "")
+
+        table.add_row(f_id, f_name, c_at, notes)
+
+    out.print(table)
+
+
+@files_app.command("upload")
+def upload_file(
+    paths: list[str] = typer.Argument(..., help="Path(s) to the file(s) to upload."),  # noqa: B008
+    id: int | None = typer.Option(None, "--id", help="Asset ID."),
+    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
+    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
+    notes: str | None = typer.Option(None, "--notes", help="Optional notes for the file(s)."),
+) -> None:
+    """Upload one or more files to an asset."""
+    import os
+    _require_config()
+    client = _get_client()
+
+    for p in paths:
+        if not os.path.isfile(p):
+            console.print(f"[red]Error:[/red] File not found: {p}")
+            raise typer.Exit(1)
+
+    asset = _resolve_asset(client, id, tag, serial)
+    asset_id = asset.id
+
+    try:
+        response = client.assets.upload_files(asset_id, paths, notes=notes)
+    except SnipeITException as exc:
+        _handle_api_error(exc)
+
+    if state.json_output:
+        out.print_json(data=response)
+    else:
+        console.print(f"[green]✓[/green] Successfully uploaded {len(paths)} file(s) to asset {asset_id}.")
+
+
+@files_app.command("download")
+def download_file(
+    file_id: int = typer.Option(..., "--file-id", help="ID of the file to download."),
+    id: int | None = typer.Option(None, "--id", help="Asset ID."),
+    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
+    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
+    output: str | None = typer.Option(None, "--output", "-o", help="Save path (defaults to original filename)."),
+) -> None:
+    """Download a file from an asset."""
+    _require_config()
+    client = _get_client()
+
+    asset = _resolve_asset(client, id, tag, serial)
+    asset_id = asset.id
+
+    save_path = output
+    if not save_path:
+        try:
+            response = client.assets.list_files(asset_id)
+            items = []
+            if isinstance(response, dict):
+                items = response.get("rows") or response.get("files") or response.get("data") or []
+            elif isinstance(response, list):
+                items = response
+            for item in items:
+                if isinstance(item, dict) and str(item.get("id")) == str(file_id):
+                    orig = item.get("filename") or item.get("name")
+                    if orig:
+                        save_path = f"./{orig}"
+                    break
+        except Exception:
+            pass
+        if not save_path:
+            save_path = f"./{file_id}_download"
+
+    try:
+        final_path = client.assets.download_file(asset_id, file_id, save_path)
+    except SnipeITException as exc:
+        _handle_api_error(exc)
+
+    if state.json_output:
+        out.print_json(data={"status": "success", "saved_to": final_path})
+    else:
+        console.print(f"[green]✓[/green] File downloaded to: {final_path}")
+
+
+@files_app.command("delete")
+def delete_file(
+    file_id: int = typer.Option(..., "--file-id", help="ID of the file to delete."),
+    id: int | None = typer.Option(None, "--id", help="Asset ID."),
+    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
+    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
+    force: bool = typer.Option(False, "--force", "-f", help="Do not prompt for confirmation."),
+) -> None:
+    """Delete a file from an asset."""
+    _require_config()
+    client = _get_client()
+
+    asset = _resolve_asset(client, id, tag, serial)
+    asset_id = asset.id
+
+    if not force:
+        confirm = typer.confirm(f"Are you sure you want to delete file {file_id} from asset {asset_id}?")
+        if not confirm:
+            console.print("[yellow]Aborted.[/yellow]")
+            raise typer.Exit(0)
+
+    try:
+        client.assets.delete_file(asset_id, file_id)
+    except SnipeITException as exc:
+        _handle_api_error(exc)
+
+    if state.json_output:
+        out.print_json(data={"status": "success"})
+    else:
+        console.print(f"[green]✓[/green] File {file_id} deleted from asset {asset_id}.")
+
