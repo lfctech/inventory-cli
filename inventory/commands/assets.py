@@ -165,7 +165,17 @@ def _asset_table(asset: Any, cfg: AppConfig) -> Table:
     storage = _get_custom_field_value(asset, cfg.custom_fields.storage_gb) or ""
     table.add_row("Storage", f"{storage} GB" if storage else "")
 
-    touch = _get_custom_field_value(asset, cfg.custom_fields.touch_screen) or ""
+    touch_raw = _get_custom_field_value(asset, cfg.custom_fields.touch_screen) or ""
+    if touch_raw == "1":
+        touch = "[green]✓[/green]"
+    elif touch_raw == "0":
+        touch = "[red]✗[/red]"
+    elif touch_raw.lower() in ("true", "yes"):
+        touch = "[green]✓[/green]"
+    elif touch_raw.lower() in ("false", "no"):
+        touch = "[red]✗[/red]"
+    else:
+        touch = touch_raw
     table.add_row("Touch Screen", touch)
 
     price = _get_custom_field_value(asset, cfg.custom_fields.sale_price) or ""
