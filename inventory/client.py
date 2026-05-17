@@ -12,7 +12,13 @@ import os
 from snipeit import SnipeIT
 
 
-def make_client(url: str | None = None, api_key: str | None = None) -> SnipeIT:
+def make_client(
+    url: str | None = None,
+    api_key: str | None = None,
+    *,
+    timeout: int = 10,
+    max_retries: int = 3,
+) -> SnipeIT:
     """
     Create a configured SnipeIT client.
 
@@ -24,6 +30,11 @@ def make_client(url: str | None = None, api_key: str | None = None) -> SnipeIT:
     API key resolution order:
       1. Explicit ``api_key`` argument (from --api-key CLI flag)
       2. SNIPEIT_API_KEY environment variable
+
+    The ``timeout`` and ``max_retries`` values are forwarded to
+    :class:`snipeit.SnipeIT`. They typically come from ``config.toml``
+    ``[snipeit]`` (caller-resolved) and fall back to the library defaults
+    (10 s timeout, 3 retries) when not specified.
 
     Raises ValueError if required values cannot be resolved.
     """
@@ -39,4 +50,9 @@ def make_client(url: str | None = None, api_key: str | None = None) -> SnipeIT:
             "API key not set. Set SNIPEIT_API_KEY or pass --api-key."
         )
 
-    return SnipeIT(url=resolved_url, token=resolved_key)
+    return SnipeIT(
+        url=resolved_url,
+        token=resolved_key,
+        timeout=timeout,
+        max_retries=max_retries,
+    )
