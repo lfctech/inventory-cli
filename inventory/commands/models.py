@@ -13,10 +13,12 @@ from rich.console import Console
 from rich.table import Table
 from snipeit import SnipeIT
 from snipeit.exceptions import SnipeITException
+from snipeit.resources.models import Model
 
 from ..core.resolvers import resolve_category, resolve_fieldset, resolve_manufacturer, resolve_model
 from ..main import state
 from ._common import get_client, handle_api_error
+from ._lookup import ModelID, ModelName
 
 console = Console(stderr=True)
 out = Console()
@@ -24,9 +26,7 @@ out = Console()
 models_app = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
 
 
-
-
-def _resolve_target_model(client: SnipeIT, model_id: int | None, name: str | None) -> Any:
+def _resolve_target_model(client: SnipeIT, model_id: int | None, name: str | None) -> Model:
     if model_id is None and name is None:
         console.print("[red]Error:[/red] Provide either --id or --name.")
         raise typer.Exit(1)
@@ -56,9 +56,9 @@ def _extract_name(field: Any) -> str:
     return str(field or "")
 
 
-def _model_dict(model: Any) -> dict:
+def _model_dict(model: Model) -> dict:
     return {
-        "id": getattr(model, "id", None),
+        "id": model.id,
         "name": getattr(model, "name", None),
         "model_number": getattr(model, "model_number", None),
         "manufacturer": _extract_name(getattr(model, "manufacturer", None)),
@@ -68,12 +68,12 @@ def _model_dict(model: Any) -> dict:
     }
 
 
-def _model_table(model: Any) -> Table:
+def _model_table(model: Model) -> Table:
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("Field", style="bold")
     table.add_column("Value")
 
-    table.add_row("ID", str(getattr(model, "id", "")))
+    table.add_row("ID", str(model.id or ""))
     table.add_row("Name", str(getattr(model, "name", "") or ""))
     table.add_row("Model Number", str(getattr(model, "model_number", "") or ""))
     table.add_row("Manufacturer", _extract_name(getattr(model, "manufacturer", None)))
@@ -86,8 +86,8 @@ def _model_table(model: Any) -> Table:
 
 @models_app.command("get")
 def get_model(
-    id: int | None = typer.Option(None, "--id", help="Model ID."),
-    name: str | None = typer.Option(None, "--name", help="Model name."),
+    id: ModelID = None,
+    name: ModelName = None,
 ) -> None:
     """Fetch and display a single model."""
     client = get_client()
@@ -104,10 +104,14 @@ def list_models(
     search: str | None = typer.Option(None, "--search", help="Search term for models."),
     limit: int = typer.Option(50, "--limit", help="Maximum number of models to return."),
 ) -> None:
-    """List models."""
+    """List models.
+
+    Uses ``list_all`` so requests larger than the server-side page size
+    (typically 50) paginate transparently rather than silently truncating.
+    """
     client = get_client()
     try:
-        results = client.models.list(search=search, limit=limit)
+        results = list(client.models.list_all(search=search, limit=limit))
     except SnipeITException as exc:
         handle_api_error(exc, entity="Model")
 
@@ -128,7 +132,7 @@ def list_models(
 
     for m in results:
         table.add_row(
-            str(getattr(m, "id", "")),
+            str(m.id or ""),
             str(getattr(m, "name", "") or ""),
             str(getattr(m, "model_number", "") or ""),
             _extract_name(getattr(m, "manufacturer", None)),
@@ -187,8 +191,8 @@ def create_model(
 
 @models_app.command("update")
 def update_model(
-    id: int | None = typer.Option(None, "--id", help="Model ID (to look up)."),
-    name: str | None = typer.Option(None, "--name", help="Model name (to look up)."),
+    id: ModelID = None,
+    name: ModelName = None,
     new_name: str | None = typer.Option(None, "--new-name", help="New model name."),
     category: str | None = typer.Option(None, "--category", help="Category name (resolved to ID via API)."),
     manufacturer: str | None = typer.Option(None, "--manufacturer", help="Manufacturer name (resolved to ID via API)."),
@@ -200,6 +204,9 @@ def update_model(
     client = get_client()
     target = _resolve_target_model(client, id, name)
     model_id = target.id
+    if model_id is None:
+        console.print("[red]Error:[/red] Resolved model has no ID.")
+        raise typer.Exit(1)
 
     payload: dict[str, Any] = {}
     if new_name is not None:
@@ -232,8 +239,8 @@ def update_model(
         raise typer.Exit(0)
 
     try:
-        client.models.patch(model_id, **payload)
-        updated = client.models.get(model_id)
+        client.models.patch(int(model_id), **payload)
+        updated = client.models.get(int(model_id))
     except SnipeITException as exc:
         handle_api_error(exc, entity="Model")
 
@@ -246,14 +253,17 @@ def update_model(
 
 @models_app.command("delete")
 def delete_model(
-    id: int | None = typer.Option(None, "--id", help="Model ID."),
-    name: str | None = typer.Option(None, "--name", help="Model name."),
+    id: ModelID = None,
+    name: ModelName = None,
     force: bool = typer.Option(False, "--force", "-f", help="Do not prompt for confirmation."),
 ) -> None:
     """Delete a model."""
     client = get_client()
     target = _resolve_target_model(client, id, name)
     model_id = target.id
+    if model_id is None:
+        console.print("[red]Error:[/red] Resolved model has no ID.")
+        raise typer.Exit(1)
 
     if not force:
         confirm = typer.confirm(f"Are you sure you want to delete model {model_id} ({getattr(target, 'name', '')})?")
@@ -262,7 +272,7 @@ def delete_model(
             raise typer.Exit(0)
 
     try:
-        client.models.delete(model_id)
+        client.models.delete(int(model_id))
     except SnipeITException as exc:
         handle_api_error(exc, entity="Model")
 

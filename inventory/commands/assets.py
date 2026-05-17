@@ -1,11 +1,13 @@
 """
 inventory.commands.assets
 =========================
-``inventory assets`` subcommand group: create, get, update, price, label.
+``inventory assets`` subcommand group: get, create, update, price, label,
+plus a ``files`` subgroup (list/upload/download/delete).
 """
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import typer
@@ -13,6 +15,7 @@ from rich.console import Console
 from rich.table import Table
 from snipeit import SnipeIT
 from snipeit.exceptions import SnipeITException
+from snipeit.resources.assets import Asset
 
 from ..config import AppConfig
 from ..core.passmark import get_average_score, lookup_csv
@@ -20,6 +23,7 @@ from ..core.pricing import calculate_price, is_desktop_category
 from ..core.resolvers import resolve_model, resolve_status_label
 from ..main import state
 from ._common import get_client, handle_api_error
+from ._lookup import AssetID, AssetSerial, AssetTag
 
 console = Console(stderr=True)
 out = Console()  # stdout for data output
@@ -41,13 +45,12 @@ def _require_config() -> AppConfig:
     return cfg
 
 
-
 def _resolve_asset(
     client: SnipeIT,
     asset_id: int | None,
     tag: str | None,
     serial: str | None,
-) -> Any:
+) -> Asset:
     """Resolve a single asset by ID, tag, or serial. Exits on failure."""
     count = sum(1 for v in (asset_id, tag, serial) if v is not None)
     if count == 0:
@@ -69,55 +72,54 @@ def _resolve_asset(
         handle_api_error(exc, entity="Asset")
 
 
-def _get_custom_field_value(asset: Any, field_key: str) -> str | None:
-    """Safely read a custom field value from an asset object."""
-    raw = getattr(asset, "custom_fields", None)
-    if not raw:
-        return None
-    val = None
-    if isinstance(raw, dict):
-        # SnipeIT returns custom fields keyed by human-readable names
-        # e.g. {"Sale Price": {"field": "_snipeit_sale_price_12", "value": "250"}}
-        for entry in raw.values():
-            if isinstance(entry, dict) and entry.get("field") == field_key:
-                val = entry.get("value")
-                break
-        else:
-            # Fallback if they are actually keyed by column name
-            entry = raw.get(field_key)
-            if isinstance(entry, dict):
-                val = entry.get("value")
-            else:
-                val = entry
-    else:
-        val = getattr(raw, field_key, None)
+def _require_int_id(asset: Asset) -> int:
+    """Return ``asset.id`` as an ``int``, exiting with a clear error otherwise.
 
+    ``Asset.id`` is typed ``int | str | None`` because Snipe-IT can return
+    string IDs in some response shapes. The CLI's downstream API calls
+    (``list_files``, ``upload_files``, etc.) all require ``int``, so this
+    helper centralises the narrowing and the failure message.
+    """
+    aid = asset.id
+    if aid is None:
+        console.print("[red]Error:[/red] Asset has no ID.")
+        raise typer.Exit(1)
+    try:
+        return int(aid)
+    except (TypeError, ValueError):
+        console.print(f"[red]Error:[/red] Asset has non-integer ID: {aid!r}.")
+        raise typer.Exit(1) from None
+
+
+def _get_custom_field_value(asset: Asset, label: str) -> str | None:
+    """Read a custom field value from an asset by display label."""
+    val = asset.get_custom_field(label)
     if val is None or str(val).strip() in ("", "None"):
         return None
     return str(val).strip()
 
 
-def _asset_table(asset: Any, cfg: AppConfig) -> Table:
+def _asset_table(asset: Asset, cfg: AppConfig) -> Table:
     """Build a rich Table from an asset object and config."""
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("Field", style="bold")
     table.add_column("Value")
 
-    table.add_row("ID", str(getattr(asset, "id", "")))
-    table.add_row("Asset Tag", str(getattr(asset, "asset_tag", "")))
-    table.add_row("Name", str(getattr(asset, "name", "") or ""))
-    table.add_row("Serial", str(getattr(asset, "serial", "") or ""))
+    table.add_row("ID", str(asset.id or ""))
+    table.add_row("Asset Tag", str(asset.asset_tag or ""))
+    table.add_row("Name", str(asset.name or ""))
+    table.add_row("Serial", str(asset.serial or ""))
 
-    model = getattr(asset, "model", None)
-    model_name = model.get("name", "") if isinstance(model, dict) else str(model or "")
+    model = asset.model
+    model_name = model.get("name", "") if isinstance(model, dict) else ""
     table.add_row("Model", model_name)
 
     status = getattr(asset, "status_label", None)
-    status_name = status.get("name", "") if isinstance(status, dict) else str(status or "")
+    status_name = status.get("name", "") if isinstance(status, dict) else ""
     table.add_row("Status", status_name)
 
     category = getattr(asset, "category", None)
-    cat_name = category.get("name", "") if isinstance(category, dict) else str(category or "")
+    cat_name = category.get("name", "") if isinstance(category, dict) else ""
     table.add_row("Category", cat_name)
 
     # Custom fields
@@ -152,19 +154,19 @@ def _asset_table(asset: Any, cfg: AppConfig) -> Table:
     return table
 
 
-def _asset_dict(asset: Any, cfg: AppConfig) -> dict:
+def _asset_dict(asset: Asset, cfg: AppConfig) -> dict:
     """Build a JSON-serializable dict from an asset object."""
-    model = getattr(asset, "model", None)
+    model = asset.model
     status = getattr(asset, "status_label", None)
     category = getattr(asset, "category", None)
     return {
-        "id": getattr(asset, "id", None),
-        "asset_tag": getattr(asset, "asset_tag", None),
-        "name": getattr(asset, "name", None),
-        "serial": getattr(asset, "serial", None),
-        "model": model.get("name") if isinstance(model, dict) else str(model or ""),
-        "status": status.get("name") if isinstance(status, dict) else str(status or ""),
-        "category": category.get("name") if isinstance(category, dict) else str(category or ""),
+        "id": asset.id,
+        "asset_tag": asset.asset_tag,
+        "name": asset.name,
+        "serial": asset.serial,
+        "model": model.get("name") if isinstance(model, dict) else "",
+        "status": status.get("name") if isinstance(status, dict) else "",
+        "category": category.get("name") if isinstance(category, dict) else "",
         "cpu": _get_custom_field_value(asset, cfg.custom_fields.cpu_model),
         "passmark": _get_custom_field_value(asset, cfg.custom_fields.cpu_passmark),
         "ram": _get_custom_field_value(asset, cfg.custom_fields.ram),
@@ -174,7 +176,8 @@ def _asset_dict(asset: Any, cfg: AppConfig) -> dict:
     }
 
 
-def _build_custom_fields(
+def _set_custom_fields(
+    asset: Asset,
     cfg: AppConfig,
     cpu: str | None = None,
     ram: int | None = None,
@@ -182,31 +185,29 @@ def _build_custom_fields(
     touch_screen: bool | None = None,
     passmark: int | None = None,
     sale_price: float | None = None,
-) -> dict[str, str]:
-    """Map optional hardware values to their Snipe-IT custom field keys."""
-    fields: dict[str, str] = {}
+) -> None:
+    """Stage custom field values on an asset for the next save()."""
     if cpu is not None:
-        fields[cfg.custom_fields.cpu_model] = cpu
+        asset.set_custom_field(cfg.custom_fields.cpu_model, cpu)
     if ram is not None:
-        fields[cfg.custom_fields.ram] = str(ram)
+        asset.set_custom_field(cfg.custom_fields.ram, str(ram))
     if storage is not None:
-        fields[cfg.custom_fields.storage] = str(storage)
+        asset.set_custom_field(cfg.custom_fields.storage, str(storage))
     if touch_screen is not None:
-        fields[cfg.custom_fields.touch_screen] = "1" if touch_screen else "0"
+        asset.set_custom_field(cfg.custom_fields.touch_screen, "1" if touch_screen else "0")
     if passmark is not None:
-        fields[cfg.custom_fields.cpu_passmark] = str(passmark)
+        asset.set_custom_field(cfg.custom_fields.cpu_passmark, str(passmark))
     if sale_price is not None:
-        fields[cfg.custom_fields.sale_price] = str(int(sale_price))
-    return fields
+        asset.set_custom_field(cfg.custom_fields.sale_price, str(int(sale_price)))
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 @assets_app.command()
 def get(
-    id: int | None = typer.Option(None, "--id", help="Asset ID."),
-    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
-    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
+    id: AssetID = None,
+    tag: AssetTag = None,
+    serial: AssetSerial = None,
 ) -> None:
     """Fetch and display a single asset."""
     cfg = _require_config()
@@ -257,17 +258,44 @@ def create(
     if name is not None:
         payload["name"] = name
 
-    # Custom fields
-    payload.update(_build_custom_fields(cfg, cpu=cpu, ram=ram, storage=storage, touch_screen=touch_screen, passmark=passmark))
-
+    # Step 1: create the asset.
     try:
-        created_asset = client.assets.create(**payload)
-        if created_asset.id is None:
-            console.print("[red]Error:[/red] Asset was created but the server returned no ID.")
-            raise typer.Exit(1)
-        asset = client.assets.get(int(created_asset.id))
+        asset = client.assets.create(**payload)
     except SnipeITException as exc:
         handle_api_error(exc, entity="Asset")
+
+    if asset.id is None:
+        console.print("[red]Error:[/red] Asset was created but the server returned no ID.")
+        raise typer.Exit(1)
+
+    # Step 2: refresh + apply custom fields. If anything goes wrong here the
+    # asset already exists in Snipe-IT, so report partial success and tell the
+    # user how to recover rather than crashing with a bare stack trace.
+    has_custom_fields = any(
+        v is not None for v in (cpu, ram, storage, touch_screen, passmark)
+    )
+    if has_custom_fields:
+        try:
+            asset.refresh()
+            _set_custom_fields(
+                asset=asset,
+                cfg=cfg,
+                cpu=cpu,
+                ram=ram,
+                storage=storage,
+                touch_screen=touch_screen,
+                passmark=passmark,
+            )
+            if asset.pending_custom_fields():
+                asset.save()
+        except (SnipeITException, RuntimeError) as exc:
+            console.print(
+                f"[yellow]Warning:[/yellow] Asset {asset.id} was created, but custom "
+                f"fields could not be applied: {exc}\n"
+                f"  Re-run with [bold]inventory assets update --id {asset.id}[/bold] "
+                "to retry."
+            )
+            raise typer.Exit(1) from None
 
     if state.json_output:
         out.print_json(data=_asset_dict(asset, cfg))
@@ -278,9 +306,9 @@ def create(
 
 @assets_app.command()
 def update(
-    id: int | None = typer.Option(None, "--id", help="Asset ID (to look up)."),
-    tag: str | None = typer.Option(None, "--tag", help="Asset tag (to look up)."),
-    serial: str | None = typer.Option(None, "--serial", help="Serial number (to look up)."),
+    id: AssetID = None,
+    tag: AssetTag = None,
+    serial: AssetSerial = None,
     model: str | None = typer.Option(None, "--model", help="Model name (resolved to ID via API)."),
     status: str | None = typer.Option(None, "--status", help="Status label name (resolved to ID via API)."),
     name: str | None = typer.Option(None, "--name", help="Asset name."),
@@ -296,54 +324,65 @@ def update(
     client = get_client()
 
     asset = _resolve_asset(client, id, tag, serial)
-    asset_id = asset.id
 
-    # Build partial payload from provided options
-    payload: dict[str, Any] = {}
+    # Set regular fields via active-record pattern
+    has_changes = False
 
     if model is not None:
         try:
-            payload["model_id"] = resolve_model(client, model)
+            asset.model_id = resolve_model(client, model)
+            has_changes = True
         except ValueError as exc:
             console.print(f"[red]Error:[/red] {exc}")
             raise typer.Exit(1) from None
 
     if status is not None:
         try:
-            payload["status_id"] = resolve_status_label(client, status)
+            asset.status_id = resolve_status_label(client, status)
+            has_changes = True
         except ValueError as exc:
             console.print(f"[red]Error:[/red] {exc}")
             raise typer.Exit(1) from None
 
     if name is not None:
-        payload["name"] = name
-    payload.update(_build_custom_fields(
-        cfg, cpu=cpu, ram=ram, storage=storage,
-        touch_screen=touch_screen, passmark=passmark, sale_price=sale_price,
-    ))
+        asset.name = name
+        has_changes = True
 
-    if not payload:
+    # Set custom fields
+    _set_custom_fields(
+        asset=asset,
+        cfg=cfg,
+        cpu=cpu,
+        ram=ram,
+        storage=storage,
+        touch_screen=touch_screen,
+        passmark=passmark,
+        sale_price=sale_price,
+    )
+    if asset.pending_custom_fields():
+        has_changes = True
+
+    if not has_changes:
         console.print("[yellow]Warning:[/yellow] No fields to update.")
         raise typer.Exit(0)
 
     try:
-        client.assets.patch(asset_id, **payload)
-        updated = client.assets.get(asset_id)
-    except SnipeITException as exc:
+        asset.save()
+    except (SnipeITException, RuntimeError) as exc:
         handle_api_error(exc, entity="Asset")
 
     if state.json_output:
-        out.print_json(data=_asset_dict(updated, cfg))
+        out.print_json(data=_asset_dict(asset, cfg))
     else:
-        console.print(f"[green]✓[/green] Asset {asset_id} updated.")
-        out.print(_asset_table(updated, cfg))
+        console.print(f"[green]✓[/green] Asset {asset.id} updated.")
+        out.print(_asset_table(asset, cfg))
 
 
 @assets_app.command()
 def price(
-    id: int | None = typer.Option(None, "--id", help="Asset ID."),
-    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
-    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
+    id: AssetID = None,
+    tag: AssetTag = None,
+    serial: AssetSerial = None,
     passmark_override: int | None = typer.Option(None, "--passmark", help="Override PassMark score."),
     ram_override: int | None = typer.Option(None, "--ram", help="RAM in GB (reads from asset if omitted)."),
     storage_override: int | None = typer.Option(None, "--storage", help="Storage in GB (reads from asset if omitted)."),
@@ -356,7 +395,7 @@ def price(
 
     asset = _resolve_asset(client, id, tag, serial)
     asset_id = asset.id
-    asset_tag = getattr(asset, "asset_tag", "?")
+    asset_tag = asset.asset_tag or "?"
 
     # ── Resolve specs from asset or overrides ─────────────────────────────
     # RAM
@@ -398,7 +437,7 @@ def price(
 
     # Chassis from category.name
     category = getattr(asset, "category", None)
-    cat_name = category.get("name", "") if isinstance(category, dict) else str(category or "")
+    cat_name = category.get("name", "") if isinstance(category, dict) else ""
     is_desktop = is_desktop_category(cat_name)
 
     # ── Resolve PassMark score ────────────────────────────────────────────
@@ -503,23 +542,26 @@ def price(
         return
 
     try:
-        fields = {
-            cfg.custom_fields.cpu_passmark: str(passmark_score),
-            cfg.custom_fields.sale_price: str(breakdown.final_price),
-        }
-        client.assets.patch(asset_id, **fields)
+        _set_custom_fields(
+            asset=asset,
+            cfg=cfg,
+            passmark=passmark_score,
+            sale_price=float(breakdown.final_price),
+        )
+        if asset.pending_custom_fields():
+            asset.save()
         console.print(
             f"[green]✓[/green] Asset {asset_tag} updated — sale price: [bold]${breakdown.final_price}[/bold]"
         )
-    except SnipeITException as exc:
+    except (SnipeITException, RuntimeError) as exc:
         handle_api_error(exc, entity="Asset")
 
 
 @assets_app.command()
 def label(
-    id: int | None = typer.Option(None, "--id", help="Asset ID."),
-    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
-    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
+    id: AssetID = None,
+    tag: AssetTag = None,
+    serial: AssetSerial = None,
     output: str = typer.Option("./label.pdf", "--output", "-o", help="Where to save the PDF."),
 ) -> None:
     """Generate and save the label PDF for an asset."""
@@ -527,7 +569,7 @@ def label(
     client = get_client()
 
     asset = _resolve_asset(client, id, tag, serial)
-    asset_tag = getattr(asset, "asset_tag", None)
+    asset_tag = asset.asset_tag
 
     if not asset_tag:
         console.print("[red]Error:[/red] Asset has no asset tag — cannot generate label.")
@@ -546,18 +588,34 @@ files_app = typer.Typer(no_args_is_help=True, rich_markup_mode="rich", help="Man
 assets_app.add_typer(files_app, name="files")
 
 
+def _extract_file_rows(response: Any) -> list[dict]:
+    """Pull the list of file entries out of a ``list_files`` response.
+
+    Snipe-IT documents the response as ``{"total": N, "rows": [...]}`` and
+    we trust that shape (verified against snipe-it/develop). The tiny bit of
+    defensiveness here just guards against the rare occasion that an older
+    server returns a bare list.
+    """
+    if isinstance(response, dict):
+        rows = response.get("rows", [])
+        return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+    if isinstance(response, list):
+        return [r for r in response if isinstance(r, dict)]
+    return []
+
+
 @files_app.command("list")
 def list_files(
-    id: int | None = typer.Option(None, "--id", help="Asset ID."),
-    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
-    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
+    id: AssetID = None,
+    tag: AssetTag = None,
+    serial: AssetSerial = None,
 ) -> None:
     """List all files attached to an asset."""
     _require_config()
     client = get_client()
 
     asset = _resolve_asset(client, id, tag, serial)
-    asset_id = asset.id
+    asset_id = _require_int_id(asset)
 
     try:
         response = client.assets.list_files(asset_id)
@@ -568,20 +626,7 @@ def list_files(
         out.print_json(data=response)
         return
 
-    # Try to extract the list of files from standard Snipe-IT envelopes
-    items = []
-    if isinstance(response, dict):
-        if "rows" in response:
-            items = response["rows"]
-        elif "files" in response:
-            items = response["files"]
-        elif "data" in response:
-            items = response["data"]
-        else:
-            items = [response]
-    elif isinstance(response, list):
-        items = response
-
+    items = _extract_file_rows(response)
     if not items:
         console.print(f"[yellow]No files found for asset {asset_id}.[/yellow]")
         return
@@ -593,11 +638,8 @@ def list_files(
     table.add_column("Notes")
 
     for item in items:
-        if not isinstance(item, dict):
-            continue
         f_id = str(item.get("id", ""))
         f_name = str(item.get("filename", "") or item.get("name", ""))
-        c_at = ""
         cat_obj = item.get("created_at")
         if isinstance(cat_obj, dict):
             c_at = str(cat_obj.get("formatted", cat_obj.get("datetime", "")))
@@ -614,13 +656,12 @@ def list_files(
 @files_app.command("upload")
 def upload_file(
     paths: list[str] = typer.Argument(..., help="Path(s) to the file(s) to upload."),  # noqa: B008
-    id: int | None = typer.Option(None, "--id", help="Asset ID."),
-    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
-    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
+    id: AssetID = None,
+    tag: AssetTag = None,
+    serial: AssetSerial = None,
     notes: str | None = typer.Option(None, "--notes", help="Optional notes for the file(s)."),
 ) -> None:
     """Upload one or more files to an asset."""
-    import os
     _require_config()
     client = get_client()
 
@@ -630,7 +671,7 @@ def upload_file(
             raise typer.Exit(1)
 
     asset = _resolve_asset(client, id, tag, serial)
-    asset_id = asset.id
+    asset_id = _require_int_id(asset)
 
     try:
         response = client.assets.upload_files(asset_id, paths, notes=notes)
@@ -646,9 +687,9 @@ def upload_file(
 @files_app.command("download")
 def download_file(
     file_id: int = typer.Option(..., "--file-id", help="ID of the file to download."),
-    id: int | None = typer.Option(None, "--id", help="Asset ID."),
-    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
-    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
+    id: AssetID = None,
+    tag: AssetTag = None,
+    serial: AssetSerial = None,
     output: str | None = typer.Option(None, "--output", "-o", help="Save path (defaults to original filename)."),
 ) -> None:
     """Download a file from an asset."""
@@ -656,24 +697,22 @@ def download_file(
     client = get_client()
 
     asset = _resolve_asset(client, id, tag, serial)
-    asset_id = asset.id
+    asset_id = _require_int_id(asset)
 
     save_path = output
     if not save_path:
+        # Best-effort: probe list_files to recover the original filename so
+        # the download lands at ./<original>. Failures are non-fatal —
+        # fall through to the deterministic synthetic name.
         try:
             response = client.assets.list_files(asset_id)
-            items = []
-            if isinstance(response, dict):
-                items = response.get("rows") or response.get("files") or response.get("data") or []
-            elif isinstance(response, list):
-                items = response
-            for item in items:
-                if isinstance(item, dict) and str(item.get("id")) == str(file_id):
+            for item in _extract_file_rows(response):
+                if str(item.get("id")) == str(file_id):
                     orig = item.get("filename") or item.get("name")
                     if orig:
                         save_path = f"./{orig}"
                     break
-        except Exception as exc:
+        except SnipeITException as exc:
             console.print(f"[dim]Note: could not resolve original filename ({exc})[/dim]")
         if not save_path:
             save_path = f"./{file_id}_download"
@@ -692,9 +731,9 @@ def download_file(
 @files_app.command("delete")
 def delete_file(
     file_id: int = typer.Option(..., "--file-id", help="ID of the file to delete."),
-    id: int | None = typer.Option(None, "--id", help="Asset ID."),
-    tag: str | None = typer.Option(None, "--tag", help="Asset tag."),
-    serial: str | None = typer.Option(None, "--serial", help="Serial number."),
+    id: AssetID = None,
+    tag: AssetTag = None,
+    serial: AssetSerial = None,
     force: bool = typer.Option(False, "--force", "-f", help="Do not prompt for confirmation."),
 ) -> None:
     """Delete a file from an asset."""
@@ -702,7 +741,7 @@ def delete_file(
     client = get_client()
 
     asset = _resolve_asset(client, id, tag, serial)
-    asset_id = asset.id
+    asset_id = _require_int_id(asset)
 
     if not force:
         confirm = typer.confirm(f"Are you sure you want to delete file {file_id} from asset {asset_id}?")
@@ -719,4 +758,3 @@ def delete_file(
         out.print_json(data={"status": "success"})
     else:
         console.print(f"[green]✓[/green] File {file_id} deleted from asset {asset_id}.")
-

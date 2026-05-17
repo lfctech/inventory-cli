@@ -23,12 +23,12 @@ def _resolve_by_name(endpoint: Any, name: str, entity_type: str) -> int:
     Generic name → ID resolver for any Snipe-IT list endpoint.
 
     Performs an exact-match (case-insensitive) against the ``name`` field of
-    every result returned by ``endpoint.list(search=name)``.
+    every result returned by ``endpoint.list_all(search=name)``.
 
     Raises ``ValueError`` if zero or multiple matches are found.
     """
     name_n = _norm(name)
-    results = endpoint.list(search=name_n)
+    results = list(endpoint.list_all(search=name_n))
     matches = [
         r for r in results
         if _norm(getattr(r, "name", "")).lower() == name_n.lower()
