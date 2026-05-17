@@ -2,16 +2,19 @@
 inventory.main
 ==============
 Typer CLI entry point.  Defines the root ``inventory`` app, global options
-(--url, --api-key, --config), and mounts subcommand groups.
+(--url, --api-key, --config, --version, --verbose), and mounts subcommand
+groups.
 """
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import typer
 from rich.console import Console
 
+from . import __version__
 from .config import (
     DEFAULT_CONFIG_TEMPLATE,
     AppConfig,
@@ -38,9 +41,49 @@ class _State:
     api_key: str | None = None
     config: AppConfig | None = None
     json_output: bool = False
+    verbose: int = 0
 
 
 state = _State()
+
+
+# ── Eager --version callback ─────────────────────────────────────────────────
+
+
+def _version_callback(value: bool) -> None:
+    """Print the package version and exit (eager: runs before all other options)."""
+    if value:
+        typer.echo(f"inventory {__version__}")
+        raise typer.Exit()
+
+
+# ── Logging setup ────────────────────────────────────────────────────────────
+
+
+def _configure_logging(verbose: int) -> None:
+    """Wire up the snipeit / snipeit.http loggers based on --verbose count.
+
+    -v     Enable INFO/WARNING from the ``snipeit`` logger (retries, timeouts).
+    -vv    Also enable DEBUG from ``snipeit.http`` (per-request traces).
+
+    The library is careful to never log API tokens or Authorization headers.
+    """
+    if verbose <= 0:
+        return
+
+    # Configure a stderr handler once so messages are visible without the
+    # caller having to do logging.basicConfig() themselves.
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+
+    snipeit_logger = logging.getLogger("snipeit")
+    snipeit_logger.addHandler(handler)
+    snipeit_logger.setLevel(logging.DEBUG if verbose >= 1 else logging.WARNING)
+
+    if verbose >= 2:
+        http_logger = logging.getLogger("snipeit.http")
+        http_logger.addHandler(handler)
+        http_logger.setLevel(logging.DEBUG)
 
 
 # ── Root callback (global options) ────────────────────────────────────────────
@@ -73,11 +116,28 @@ def main(
         "--json",
         help="Output in JSON format.",
     ),
+    verbose: int = typer.Option(
+        0,
+        "--verbose",
+        "-v",
+        count=True,
+        help="Increase log verbosity. -v: snipeit warnings/info; -vv: include HTTP trace.",
+    ),
+    _version: bool | None = typer.Option(
+        None,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the version and exit.",
+    ),
 ) -> None:
     """Snipe-IT inventory management CLI."""
     state.url = url
     state.api_key = api_key
     state.json_output = json_output
+    state.verbose = verbose
+
+    _configure_logging(verbose)
 
     # Resolve and load config
     try:
@@ -130,6 +190,15 @@ def init(
     target.write_text(DEFAULT_CONFIG_TEMPLATE)
     console.print(f"[green]✓[/green] Config written to: {target}")
     console.print("  Edit the [bold][custom_fields][/bold] section to match your Snipe-IT instance.")
+
+
+# ── Version command ──────────────────────────────────────────────────────────
+
+
+@app.command()
+def version() -> None:
+    """Show the inventory CLI version."""
+    typer.echo(f"inventory {__version__}")
 
 
 # ── Mount subcommand groups ──────────────────────────────────────────────────
