@@ -40,7 +40,7 @@ uv run inventory init
 uvx --from git+https://github.com/lfctech/inventory-cli inventory init
 ```
 
-This writes a template to `~/.config/inventory/config.toml`. Edit the `[custom_fields]` section to match your Snipe-IT instance's custom field DB column names.
+This writes a template to `~/.config/inventory/config.toml`. Edit the `[custom_fields]` section so each value matches the **display label** shown in your Snipe-IT UI (for example `"RAM (GB)"`). The CLI translates labels to the underlying column names automatically via the API.
 
 Config resolution order:
 1. `--config <path>` CLI flag
