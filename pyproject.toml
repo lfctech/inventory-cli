@@ -19,7 +19,10 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv.sources]
-snipeit-api = { git = "https://github.com/lfctech/snipeit-python-api" }
+# Pinned to the v0.4.0 release commit on snipeit-python-api.
+# When the v0.4.0 tag is pushed to GitHub, this can be switched to:
+#   snipeit-api = { git = "...", tag = "v0.4.0" }
+snipeit-api = { git = "https://github.com/lfctech/snipeit-python-api", rev = "6b2e039a9542107af59464a3b4eac20a8660a3d9" }
 
 [tool.setuptools.packages.find]
 include = ["inventory*"]
@@ -31,6 +34,8 @@ inventory = ["data/*.csv"]
 dev = [
     "pyright>=1.1.409",
     "ruff>=0.15.12",
+    "pytest>=8",
+    "pytest-httpx>=0.30",
 ]
 
 [tool.ruff]
