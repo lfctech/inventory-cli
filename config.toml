@@ -4,16 +4,20 @@
 [snipeit]
 # Snipe-IT instance URL. Can also be set via SNIPEIT_URL env var or --url flag.
 url = "https://inventory.lfctech.org"
+# HTTP request timeout in seconds (per-request). Optional.
+# timeout = 10
+# Maximum retry attempts for transient errors (429/5xx). Optional.
+# max_retries = 3
 
 [custom_fields]
-# Maps CLI argument names -> Snipe-IT custom field db column names.
-# Update these to match your Snipe-IT instance's custom field keys.
-cpu_model     = "_snipeit_cpu_11"
-cpu_passmark  = "_snipeit_cpu_passmark_score_8"
-ram           = "_snipeit_ram_gb_9"
-storage       = "_snipeit_storage_gb_10"
-sale_price    = "_snipeit_sale_price_12"
-touch_screen  = "_snipeit_touchscreen_13"
+# Maps CLI argument names -> Snipe-IT custom field display labels.
+# These must match the label shown in the Snipe-IT UI exactly.
+cpu_model     = "CPU"
+cpu_passmark  = "CPU PassMark Score"
+ram           = "RAM (GB)"
+storage       = "Storage (GB)"
+sale_price    = "Sale Price"
+touch_screen  = "Touchscreen"
 
 [pricing]
 # Points -> price tier table.

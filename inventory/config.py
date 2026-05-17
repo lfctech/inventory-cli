@@ -24,16 +24,20 @@ DEFAULT_CONFIG_TEMPLATE = """\
 [snipeit]
 # Snipe-IT instance URL. Can also be set via SNIPEIT_URL env var or --url flag.
 url = "https://inventory.example.com"
+# HTTP request timeout in seconds (per-request). Optional.
+# timeout = 10
+# Maximum retry attempts for transient errors (429/5xx). Optional.
+# max_retries = 3
 
 [custom_fields]
-# Maps CLI argument names -> Snipe-IT custom field db column names.
-# Update these to match your Snipe-IT instance's custom field keys.
-cpu_model     = "_snipeit_cpu_11"
-cpu_passmark  = "_snipeit_cpu_passmark_score_8"
-ram           = "_snipeit_ram_gb_9"
-storage       = "_snipeit_storage_gb_10"
-sale_price    = "_snipeit_sale_price_12"
-touch_screen  = "_snipeit_touchscreen_13"
+# Maps CLI argument names -> Snipe-IT custom field display labels.
+# These must match the label shown in the Snipe-IT UI exactly.
+cpu_model     = "CPU"
+cpu_passmark  = "CPU PassMark Score"
+ram           = "RAM (GB)"
+storage       = "Storage (GB)"
+sale_price    = "Sale Price"
+touch_screen  = "Touchscreen"
 
 [pricing]
 # Points -> price tier table.
@@ -60,16 +64,18 @@ fuzzy_threshold = 80  # confidence % below which operator is prompted
 @dataclass
 class SnipeITConfig:
     url: str | None = None
+    timeout: int = 10
+    max_retries: int = 3
 
 
 @dataclass
 class CustomFieldsConfig:
-    cpu_model: str = "_snipeit_cpu_11"
-    cpu_passmark: str = "_snipeit_cpu_passmark_score_8"
-    ram: str = "_snipeit_ram_gb_9"
-    storage: str = "_snipeit_storage_gb_10"
-    sale_price: str = "_snipeit_sale_price_12"
-    touch_screen: str = "_snipeit_touchscreen_13"
+    cpu_model: str = "CPU"
+    cpu_passmark: str = "CPU PassMark Score"
+    ram: str = "RAM (GB)"
+    storage: str = "Storage (GB)"
+    sale_price: str = "Sale Price"
+    touch_screen: str = "Touchscreen"
 
 
 @dataclass
@@ -170,6 +176,8 @@ def load_config(config_path: Path) -> AppConfig:
 
     snipeit = SnipeITConfig(
         url=snipeit_raw.get("url"),
+        timeout=int(snipeit_raw.get("timeout", 10)),
+        max_retries=int(snipeit_raw.get("max_retries", 3)),
     )
 
     defaults = CustomFieldsConfig()
