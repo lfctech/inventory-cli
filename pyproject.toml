@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "typer>=0.12,<1",
     "rich>=13,<16",
-    "snipeit-api",
+    "snipeit-api>=0.5.0,<1",
     "rapidfuzz>=3,<4",
 ]
 
@@ -19,10 +19,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv.sources]
-# Pinned to the v0.4.0 release commit on snipeit-python-api.
-# When the v0.4.0 tag is pushed to GitHub, this can be switched to:
-#   snipeit-api = { git = "...", tag = "v0.4.0" }
-snipeit-api = { git = "https://github.com/lfctech/snipeit-python-api", rev = "6b2e039a9542107af59464a3b4eac20a8660a3d9" }
+snipeit-api = { git = "https://github.com/lfctech/snipeit-python-api", tag = "v0.5.0" }
 
 [tool.setuptools.packages.find]
 include = ["inventory*"]

@@ -158,6 +158,15 @@ def _parse_tiers(raw: list[list[int]]) -> list[PricingTier]:
         tiers.append(PricingTier(max_points=int(entry[0]), price=int(entry[1])))
     # Sort by max_points ascending for correct tier lookup
     tiers.sort(key=lambda t: t.max_points)
+    # Validate prices are monotonically non-decreasing after sorting
+    for i in range(1, len(tiers)):
+        if tiers[i].price < tiers[i - 1].price:
+            raise ValueError(
+                f"Pricing tier prices must be non-decreasing, but tier "
+                f"(max_points={tiers[i].max_points}, price={tiers[i].price}) "
+                f"is less than previous tier (max_points={tiers[i-1].max_points}, "
+                f"price={tiers[i-1].price})"
+            )
     return tiers
 
 
@@ -175,7 +184,7 @@ def load_config(config_path: Path) -> AppConfig:
     passmark_raw = raw.get("passmark", {})
 
     snipeit = SnipeITConfig(
-        url=snipeit_raw.get("url"),
+        url=snipeit_raw.get("url", "").rstrip("/") or None,
         timeout=int(snipeit_raw.get("timeout", 10)),
         max_retries=int(snipeit_raw.get("max_retries", 3)),
     )

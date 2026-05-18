@@ -140,7 +140,7 @@ dev = [
 requires-dist = [
     { name = "rapidfuzz", specifier = ">=3,<4" },
     { name = "rich", specifier = ">=13,<16" },
-    { name = "snipeit-api", git = "https://github.com/lfctech/snipeit-python-api?rev=6b2e039a9542107af59464a3b4eac20a8660a3d9" },
+    { name = "snipeit-api", git = "https://github.com/lfctech/snipeit-python-api?tag=v0.5.0" },
     { name = "typer", specifier = ">=0.12,<1" },
 ]
 
@@ -423,8 +423,8 @@ wheels = [
 
 [[package]]
 name = "snipeit-api"
-version = "0.4.0"
-source = { git = "https://github.com/lfctech/snipeit-python-api?rev=6b2e039a9542107af59464a3b4eac20a8660a3d9#6b2e039a9542107af59464a3b4eac20a8660a3d9" }
+version = "0.5.0"
+source = { git = "https://github.com/lfctech/snipeit-python-api?tag=v0.5.0#32211c93c1ef44d2d5ae42dfcdda04ec4aa9b8b5" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },

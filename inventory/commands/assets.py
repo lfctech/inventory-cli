@@ -318,6 +318,7 @@ def update(
     touch_screen: bool | None = typer.Option(None, "--touch-screen/--no-touch-screen", help="Has touch screen."),
     passmark: int | None = typer.Option(None, "--passmark", help="CPU PassMark score."),
     sale_price: float | None = typer.Option(None, "--sale-price", help="Sale price in dollars."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print changes without writing to Snipe-IT."),
 ) -> None:
     """Update one or more fields on an existing asset."""
     cfg = _require_config()
@@ -365,6 +366,14 @@ def update(
     if not has_changes:
         console.print("[yellow]Warning:[/yellow] No fields to update.")
         raise typer.Exit(0)
+
+    if dry_run:
+        console.print("[yellow]Dry run — no changes written to Snipe-IT.[/yellow]")
+        if state.json_output:
+            out.print_json(data=_asset_dict(asset, cfg))
+        else:
+            out.print(_asset_table(asset, cfg))
+        return
 
     try:
         asset.save()

@@ -96,6 +96,12 @@ def calculate_price(
     Calculate the sale price for a device given its hardware specs.
     Returns a PriceBreakdown with all intermediate values for display.
     """
+    if passmark_score < 0:
+        raise ValueError(f"passmark_score must be non-negative, got {passmark_score}")
+    if ram < 0:
+        raise ValueError(f"ram must be non-negative, got {ram}")
+    if storage < 0:
+        raise ValueError(f"storage must be non-negative, got {storage}")
     c_pts = cpu_points(passmark_score)
     r_pts = ram_points(ram)
     s_pts = storage_points(storage)

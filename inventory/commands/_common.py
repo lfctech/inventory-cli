@@ -57,17 +57,23 @@ def get_client() -> SnipeIT:
 def handle_api_error(exc: Exception, entity: str = "Resource") -> NoReturn:
     """Print a user-friendly error and exit."""
     if isinstance(exc, SnipeITAuthenticationError):
-        console.print("[red]Error:[/red] Authentication failed. Check your API key.")
+        message = "Authentication failed. Check your API key."
     elif isinstance(exc, SnipeITNotFoundError):
-        console.print(f"[red]Error:[/red] {entity} not found.")
+        message = f"{entity} not found."
     elif isinstance(exc, SnipeITValidationError):
-        console.print(f"[red]Error:[/red] Validation failed — {exc}")
+        message = f"Validation failed — {exc}"
     elif isinstance(exc, SnipeITServerError):
-        console.print("[red]Error:[/red] Snipe-IT server error. Try again later.")
+        message = "Snipe-IT server error. Try again later."
     elif isinstance(exc, SnipeITTimeoutError):
-        console.print("[red]Error:[/red] Request timed out.")
+        message = "Request timed out."
     elif isinstance(exc, SnipeITClientError):
-        console.print(f"[red]Error:[/red] Client error — {exc}")
+        message = f"Client error — {exc}"
     else:
-        console.print(f"[red]Error:[/red] {exc}")
+        message = str(exc)
+
+    if state.json_output:
+        out = Console()
+        out.print_json(data={"error": message})
+    else:
+        console.print(f"[red]Error:[/red] {message}")
     raise typer.Exit(1)
