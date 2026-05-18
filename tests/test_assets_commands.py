@@ -501,3 +501,83 @@ def test_version_flag(runner: CliRunner) -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
     assert result.stdout.startswith("inventory ")
+
+
+# ── files download: filename recovery ────────────────────────────────────────
+
+
+def test_download_recovers_filename_from_list_files(
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock, tmp_path, monkeypatch
+) -> None:
+    """When --output is omitted, download probes list_files to recover the original filename."""
+    monkeypatch.chdir(tmp_path)
+
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{TEST_URL}/api/v1/hardware/1",
+        json=asset_payload(asset_id=1),
+    )
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{TEST_URL}/api/v1/hardware/1/files",
+        json={"total": 1, "rows": [{"id": 42, "filename": "report.pdf"}]},
+    )
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{TEST_URL}/api/v1/hardware/1/files/42",
+        content=b"%PDF-fake",
+    )
+
+    result = runner.invoke(
+        app,
+        ["--config", str(config_file), "assets", "files", "download", "--id", "1", "--file-id", "42"],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "report.pdf" in result.stdout or "report.pdf" in result.stderr
+
+
+def test_download_falls_back_to_synthetic_name_when_list_fails(
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock, tmp_path, monkeypatch
+) -> None:
+    """When list_files fails, download uses a synthetic <file_id>_download name."""
+    monkeypatch.chdir(tmp_path)
+
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{TEST_URL}/api/v1/hardware/1",
+        json=asset_payload(asset_id=1),
+    )
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{TEST_URL}/api/v1/hardware/1/files",
+        json={"total": 0, "rows": []},
+    )
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{TEST_URL}/api/v1/hardware/1/files/99",
+        content=b"data",
+    )
+
+    result = runner.invoke(
+        app,
+        ["--config", str(config_file), "assets", "files", "download", "--id", "1", "--file-id", "99"],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "99_download" in result.stdout or "99_download" in result.stderr
+
+
+# ── files upload: file-existence validation ──────────────────────────────────
+
+
+def test_upload_rejects_nonexistent_file(
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
+) -> None:
+    """Upload exits with an error before hitting the API if a file doesn't exist."""
+    result = runner.invoke(
+        app,
+        ["--config", str(config_file), "assets", "files", "upload", "--id", "1", "/no/such/file.txt"],
+    )
+    assert result.exit_code == 1
+    assert "not found" in result.stderr.lower() or "not found" in strip_ansi(result.stderr).lower()
+    # No requests should have been made (file check happens before API calls).
+    assert not httpx_mock.get_requests()
