@@ -5,7 +5,7 @@ inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 bumps for breaking changes or significant new features, patch bumps for fixes).
 
-## Unreleased
+## 0.2.0 — 2026-05-19
 
 ### Tests and CI
 
