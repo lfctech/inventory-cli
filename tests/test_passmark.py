@@ -7,7 +7,6 @@ import pytest
 from inventory.core.passmark import (
     clean_cpu_name,
     extract_model_id,
-    get_average_score,
     lookup_csv,
 )
 
@@ -130,15 +129,3 @@ def test_lookup_csv_returns_typed_dict_keys() -> None:
     assert result is not None
     assert set(result.keys()) == {"score", "matched_cpu", "confidence"}
 
-
-# ── get_average_score ────────────────────────────────────────────────────────
-
-
-def test_get_average_score_is_positive_and_within_plausible_range() -> None:
-    """The bundled CSV must contain enough scoreable rows to produce a
-    reasonable average. We don't pin an exact value (the CSV may be
-    refreshed) — only that the result is a positive integer in a
-    plausible band for consumer CPUs."""
-    avg = get_average_score()
-    assert isinstance(avg, int)
-    assert 1_000 <= avg <= 50_000

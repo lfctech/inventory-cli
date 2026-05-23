@@ -169,15 +169,3 @@ def lookup_csv(cpu_name: str) -> PassmarkResult | None:
         score=best_score, matched_cpu=best_cpu, confidence=best_confidence,
     )
 
-
-def get_average_score() -> int:
-    """Return the mean CPU BenchMark score across all valid rows in the bundled CSV."""
-    try:
-        rows = _load_bundled_csv()
-    except Exception:
-        return 0
-
-    scores = [s for row in rows if (s := _parse_score(row)) is not None]
-    if not scores:
-        return 0
-    return int(sum(scores) / len(scores))

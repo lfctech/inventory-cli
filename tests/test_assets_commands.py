@@ -488,6 +488,33 @@ def test_price_missing_ram_in_asset_errors_out(
     assert "no RAM value" in result.stderr.lower() or "ram" in result.stderr.lower()
 
 
+def test_price_unresolved_passmark_errors_out(
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
+) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{TEST_URL}/api/v1/hardware/1",
+        json=asset_payload(
+            asset_id=1,
+            custom_fields={
+                "CPU": {"field": "_snipeit_cpu_1", "value": "Unknown-Super-CPU-3000"},
+                "CPU PassMark Score": {"field": "_snipeit_cpu_passmark_score_2", "value": ""},
+                "RAM (GB)": {"field": "_snipeit_ram_gb_3", "value": "16"},
+                "Storage (GB)": {"field": "_snipeit_storage_gb_4", "value": "512"},
+                "Sale Price": {"field": "_snipeit_sale_price_5", "value": ""},
+                "Touchscreen": {"field": "_snipeit_touchscreen_6", "value": "0"},
+            },
+        ),
+    )
+    result = runner.invoke(
+        app,
+        ["--config", str(config_file), "assets", "price", "--id", "1"],
+        input="n\n",
+    )
+    assert result.exit_code == 1
+    assert "could not resolve passmark score" in result.stderr.lower()
+
+
 # ── version subcommand ───────────────────────────────────────────────────────
 
 

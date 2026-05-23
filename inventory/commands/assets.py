@@ -18,7 +18,7 @@ from snipeit.exceptions import SnipeITException
 from snipeit.resources.assets import Asset
 
 from ..config import AppConfig
-from ..core.passmark import get_average_score, lookup_csv
+from ..core.passmark import lookup_csv
 from ..core.pricing import calculate_price, is_desktop_category
 from ..core.resolvers import resolve_model, resolve_status_label
 from ..main import state
@@ -493,15 +493,14 @@ def price(
                         passmark_score = result["score"]
                         passmark_source = "csv_confirmed"
 
-    # 4. Average fallback
+    # 4. No score resolved — abort
     if passmark_score is None:
-        passmark_score = get_average_score()
-        passmark_source = "csv_average"
         cpu_name = _get_custom_field_value(asset, cfg.custom_fields.cpu_model) or "unknown"
         console.print(
-            f"[yellow]Warning:[/yellow] Using CSV average ({passmark_score}) for '{cpu_name}'. "
-            "Price may not reflect actual performance."
+            f"[red]Error:[/red] Could not resolve PassMark score for '{cpu_name}'. "
+            "Pass --passmark <score> to set it manually."
         )
+        raise typer.Exit(1)
 
     # ── Calculate ─────────────────────────────────────────────────────────
     breakdown = calculate_price(

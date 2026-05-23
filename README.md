@@ -152,7 +152,6 @@ Tiers and bonuses are configurable in `config.toml`.
 2. Existing `cpu_passmark` value in Snipe-IT → used silently
 3. Fuzzy match against bundled `PassmarkCPUList.csv` → auto-accept if ≥ 80% confidence
 4. Low confidence → prompt operator to confirm
-5. No match → use CSV average, print warning
 
 ---
 
@@ -163,5 +162,5 @@ $env:SNIPEIT_API_KEY = $secrets.SnipeItKey
 $env:INVENTORY_CONFIG = "$PSScriptRoot\inventory\config.toml"
 # URL is read from config.toml [snipeit].url
 
-uvx --from git+https://github.com/lfctech/inventory-cli inventory assets price --serial $serial
+uvx --from git+https://github.com/lfctech/inventory-cli@vx.x.x inventory assets price --serial $serial
 ```
