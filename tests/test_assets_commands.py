@@ -181,6 +181,94 @@ def test_create_basic_no_custom_fields(
     assert body == {"status_id": 9, "model_id": 5}
 
 
+def test_create_creates_missing_model_when_requested(
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
+) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=re.compile(r"^https://snipe\.example\.test/api/v1/models\b"),
+        json={"total": 0, "rows": []},
+    )
+    httpx_mock.add_response(
+        method="GET",
+        url=re.compile(r"^https://snipe\.example\.test/api/v1/categories\b"),
+        json={"total": 1, "rows": [{"id": 3, "name": "Laptop"}]},
+    )
+    httpx_mock.add_response(
+        method="GET",
+        url=re.compile(r"^https://snipe\.example\.test/api/v1/manufacturers\b"),
+        json={"total": 1, "rows": [{"id": 4, "name": "Dell"}]},
+    )
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{TEST_URL}/api/v1/models",
+        json={"status": "success", "payload": {"id": 11, "name": "Latitude 5450"}},
+    )
+    httpx_mock.add_response(
+        method="GET",
+        url=re.compile(r"^https://snipe\.example\.test/api/v1/statuslabels\b"),
+        json={"total": 1, "rows": [{"id": 9, "name": "Ready"}]},
+    )
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{TEST_URL}/api/v1/hardware",
+        json={"status": "success", "payload": asset_payload(asset_id=42, asset_tag="LFC-42")},
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--config", str(config_file),
+            "assets", "create",
+            "--model", "Latitude 5450",
+            "--status", "Ready",
+            "--create-model",
+            "--category", "Laptop",
+            "--manufacturer", "Dell",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert "Model created" in result.stderr
+
+    posts = [r for r in httpx_mock.get_requests() if r.method == "POST"]
+    assert len(posts) == 2
+    model_body = json.loads(posts[0].content)
+    assert model_body == {
+        "name": "Latitude 5450",
+        "category_id": 3,
+        "manufacturer_id": 4,
+    }
+    asset_body = json.loads(posts[1].content)
+    assert asset_body == {"status_id": 9, "model_id": 11}
+
+
+def test_create_model_requires_category_and_manufacturer_for_missing_model(
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
+) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=re.compile(r"^https://snipe\.example\.test/api/v1/models\b"),
+        json={"total": 0, "rows": []},
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--config", str(config_file),
+            "assets", "create",
+            "--model", "Latitude 5450",
+            "--status", "Ready",
+            "--create-model",
+            "--category", "Laptop",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "--manufacturer is required" in strip_ansi(result.stderr)
+    assert not [r for r in httpx_mock.get_requests() if r.method == "POST"]
+
+
 def test_create_with_custom_fields_full_flow(
     runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
 ) -> None:

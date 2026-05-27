@@ -110,6 +110,24 @@ inventory assets get --tag LFC-1042
 inventory assets get --serial SN12345
 ```
 
+### Creating assets with new models
+
+`assets create` normally fails if `--model` does not exactly match an existing
+Snipe-IT model. Pass `--create-model` to create the missing model first:
+
+```bash
+inventory assets create \
+  --model "Latitude 5450" \
+  --status Intake \
+  --create-model \
+  --category Laptop \
+  --manufacturer Dell
+```
+
+When a model must be created, `--category` and `--manufacturer` are required.
+Optional model fields are available with `--fieldset`, `--model-number`, and
+`--notes`.
+
 ### JSON output
 
 All commands support `--json` for machine-readable output:

@@ -5,6 +5,15 @@ inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 bumps for breaking changes or significant new features, patch bumps for fixes).
 
+## 0.3.0 — 2026-05-27
+
+### New features
+
+- **`assets create --create-model`**: optionally create a missing Snipe-IT
+  model before creating the asset. Creating the model requires
+  `--category` and `--manufacturer`, with optional `--fieldset`,
+  `--model-number`, and `--notes`.
+
 ## 0.2.0 — 2026-05-19
 
 ### Tests and CI

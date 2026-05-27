@@ -20,7 +20,13 @@ from snipeit.resources.assets import Asset
 from ..config import AppConfig
 from ..core.passmark import lookup_csv
 from ..core.pricing import calculate_price, is_desktop_category
-from ..core.resolvers import resolve_model, resolve_status_label
+from ..core.resolvers import (
+    resolve_category,
+    resolve_fieldset,
+    resolve_manufacturer,
+    resolve_model,
+    resolve_status_label,
+)
 from ..main import state
 from ._common import get_client, handle_api_error
 from ._lookup import AssetID, AssetSerial, AssetTag
@@ -201,6 +207,64 @@ def _set_custom_fields(
         asset.set_custom_field(cfg.custom_fields.sale_price, str(int(sale_price)))
 
 
+def _resolve_or_create_model(
+    client: SnipeIT,
+    *,
+    name: str,
+    create_model: bool,
+    category: str | None,
+    manufacturer: str | None,
+    fieldset: str | None,
+    model_number: str | None,
+    notes: str | None,
+) -> int:
+    try:
+        return resolve_model(client, name)
+    except ValueError as exc:
+        if not create_model or not str(exc).startswith("No model found"):
+            raise
+
+    missing = []
+    if category is None:
+        missing.append("--category")
+    if manufacturer is None:
+        missing.append("--manufacturer")
+    if missing:
+        raise ValueError(
+            f"{' and '.join(missing)} is required when --create-model creates a missing model."
+        )
+    assert category is not None
+    assert manufacturer is not None
+
+    cat_id = resolve_category(client, category)
+    mfg_id = resolve_manufacturer(client, manufacturer)
+    fs_id = resolve_fieldset(client, fieldset) if fieldset is not None else None
+
+    payload: dict[str, Any] = {
+        "name": name,
+        "category_id": cat_id,
+        "manufacturer_id": mfg_id,
+    }
+    if fs_id is not None:
+        payload["fieldset_id"] = fs_id
+    if model_number is not None:
+        payload["model_number"] = model_number
+    if notes is not None:
+        payload["notes"] = notes
+
+    try:
+        created = client.models.create(**payload)
+    except SnipeITException as exc:
+        handle_api_error(exc, entity="Model")
+
+    if created.id is None:
+        console.print("[red]Error:[/red] Model was created but the server returned no ID.")
+        raise typer.Exit(1)
+
+    console.print(f"[green]✓[/green] Model created: {name} ({created.id})")
+    return int(created.id)
+
+
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 @assets_app.command()
@@ -228,6 +292,12 @@ def create(
     asset_tag: str | None = typer.Option(None, "--asset-tag", help="Asset tag (auto-assigned if omitted)."),
     serial: str | None = typer.Option(None, "--serial", help="Serial number."),
     name: str | None = typer.Option(None, "--name", help="Asset name."),
+    create_model: bool = typer.Option(False, "--create-model", help="Create the model if it does not exist."),
+    category: str | None = typer.Option(None, "--category", help="Category name for --create-model."),
+    manufacturer: str | None = typer.Option(None, "--manufacturer", help="Manufacturer name for --create-model."),
+    fieldset: str | None = typer.Option(None, "--fieldset", help="Fieldset name for --create-model."),
+    model_number: str | None = typer.Option(None, "--model-number", help="Model number for --create-model."),
+    notes: str | None = typer.Option(None, "--notes", help="Model notes for --create-model."),
     cpu: str | None = typer.Option(None, "--cpu", help="CPU model string."),
     ram: int | None = typer.Option(None, "--ram", help="RAM in GB."),
     storage: int | None = typer.Option(None, "--storage", help="Storage in GB."),
@@ -240,7 +310,16 @@ def create(
 
     # Resolve model and status names to IDs
     try:
-        model_id = resolve_model(client, model)
+        model_id = _resolve_or_create_model(
+            client,
+            name=model,
+            create_model=create_model,
+            category=category,
+            manufacturer=manufacturer,
+            fieldset=fieldset,
+            model_number=model_number,
+            notes=notes,
+        )
         status_id = resolve_status_label(client, status)
     except ValueError as exc:
         console.print(f"[red]Error:[/red] {exc}")
