@@ -10,7 +10,6 @@ import atexit
 from typing import NoReturn
 
 import typer
-from rich.console import Console
 from snipeit import SnipeIT
 from snipeit.exceptions import (
     SnipeITAuthenticationError,
@@ -22,9 +21,8 @@ from snipeit.exceptions import (
 )
 
 from ..client import make_client
+from ..console import abort, print_error
 from ..main import state
-
-console = Console(stderr=True)
 
 
 def get_client() -> SnipeIT:
@@ -47,8 +45,7 @@ def get_client() -> SnipeIT:
             max_retries=max_retries,
         )
     except ValueError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1) from None
+        abort(str(exc))
 
     atexit.register(client.close)
     return client
@@ -71,9 +68,5 @@ def handle_api_error(exc: Exception, entity: str = "Resource") -> NoReturn:
     else:
         message = str(exc)
 
-    if state.json_output:
-        out = Console()
-        out.print_json(data={"error": message})
-    else:
-        console.print(f"[red]Error:[/red] {message}")
+    print_error(message)
     raise typer.Exit(1)

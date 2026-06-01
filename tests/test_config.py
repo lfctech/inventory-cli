@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import cast
 
 import pytest
+from typer.testing import CliRunner
 
 from inventory.config import (
     PricingTier,
@@ -14,6 +16,7 @@ from inventory.config import (
     load_config,
     resolve_config_path,
 )
+from inventory.main import _configure_logging, app
 
 pytestmark = pytest.mark.unit
 
@@ -208,3 +211,36 @@ def test_load_config_missing_file_raises_value_error(tmp_path: Path) -> None:
     p = tmp_path / "does-not-exist.toml"
     with pytest.raises(ValueError, match=r"Could not load config\.toml"):
         load_config(p)
+
+
+def test_init_success_writes_human_output_to_stdout(
+    runner: CliRunner, reset_state, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("INVENTORY_CONFIG", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    result = runner.invoke(app, ["init"])
+
+    assert result.exit_code == 0, result.stderr
+    assert "Config written to:" in result.stdout
+    assert result.stderr == ""
+    assert (tmp_path / "inventory" / "config.toml").exists()
+
+
+def test_configure_logging_is_idempotent() -> None:
+    logger = logging.getLogger("snipeit")
+    original_handlers = list(logger.handlers)
+    try:
+        logger.handlers = [
+            h for h in logger.handlers if not getattr(h, "_inventory_cli_handler", False)
+        ]
+
+        _configure_logging(1)
+        _configure_logging(1)
+
+        cli_handlers = [
+            h for h in logger.handlers if getattr(h, "_inventory_cli_handler", False)
+        ]
+        assert len(cli_handlers) == 1
+    finally:
+        logger.handlers = original_handlers

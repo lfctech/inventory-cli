@@ -11,13 +11,13 @@ import os
 from typing import Any
 
 import typer
-from rich.console import Console
 from rich.table import Table
 from snipeit import SnipeIT
 from snipeit.exceptions import SnipeITException
 from snipeit.resources.assets import Asset
 
 from ..config import AppConfig
+from ..console import abort, confirm, console, out, print_warning
 from ..core.passmark import lookup_csv
 from ..core.pricing import calculate_price, is_desktop_category
 from ..core.resolvers import (
@@ -31,9 +31,6 @@ from ..main import state
 from ._common import get_client, handle_api_error
 from ._lookup import AssetID, AssetSerial, AssetTag
 
-console = Console(stderr=True)
-out = Console()  # stdout for data output
-
 assets_app = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
 
 
@@ -43,11 +40,10 @@ def _require_config() -> AppConfig:
     """Ensure config is loaded, exit with a helpful message if not."""
     cfg = state.config
     if cfg is None:
-        console.print(
-            "[red]Error:[/red] No config.toml found.\n"
-            "  Pass --config <path>, set INVENTORY_CONFIG, or run [bold]inventory init[/bold]."
+        abort(
+            "No config.toml found.\n"
+            "  Pass --config <path>, set INVENTORY_CONFIG, or run inventory init."
         )
-        raise typer.Exit(1)
     return cfg
 
 
@@ -60,11 +56,9 @@ def _resolve_asset(
     """Resolve a single asset by ID, tag, or serial. Exits on failure."""
     count = sum(1 for v in (asset_id, tag, serial) if v is not None)
     if count == 0:
-        console.print("[red]Error:[/red] Provide one of --id, --tag, or --serial.")
-        raise typer.Exit(1)
+        abort("Provide one of --id, --tag, or --serial.")
     if count > 1:
-        console.print("[red]Error:[/red] Provide only one of --id, --tag, or --serial.")
-        raise typer.Exit(1)
+        abort("Provide only one of --id, --tag, or --serial.")
 
     try:
         if asset_id is not None:
@@ -88,13 +82,11 @@ def _require_int_id(asset: Asset) -> int:
     """
     aid = asset.id
     if aid is None:
-        console.print("[red]Error:[/red] Asset has no ID.")
-        raise typer.Exit(1)
+        abort("Asset has no ID.")
     try:
         return int(aid)
     except (TypeError, ValueError):
-        console.print(f"[red]Error:[/red] Asset has non-integer ID: {aid!r}.")
-        raise typer.Exit(1) from None
+        abort(f"Asset has non-integer ID: {aid!r}.")
 
 
 def _get_custom_field_value(asset: Asset, label: str) -> str | None:
@@ -258,8 +250,7 @@ def _resolve_or_create_model(
         handle_api_error(exc, entity="Model")
 
     if created.id is None:
-        console.print("[red]Error:[/red] Model was created but the server returned no ID.")
-        raise typer.Exit(1)
+        abort("Model was created but the server returned no ID.")
 
     console.print(f"[green]✓[/green] Model created: {name} ({created.id})")
     return int(created.id)
@@ -322,8 +313,7 @@ def create(
         )
         status_id = resolve_status_label(client, status)
     except ValueError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1) from None
+        abort(str(exc))
 
     # Build payload
     payload: dict[str, Any] = {
@@ -344,8 +334,7 @@ def create(
         handle_api_error(exc, entity="Asset")
 
     if asset.id is None:
-        console.print("[red]Error:[/red] Asset was created but the server returned no ID.")
-        raise typer.Exit(1)
+        abort("Asset was created but the server returned no ID.")
 
     # Step 2: refresh + apply custom fields. If anything goes wrong here the
     # asset already exists in Snipe-IT, so report partial success and tell the
@@ -413,16 +402,14 @@ def update(
             asset.model_id = resolve_model(client, model)
             has_changes = True
         except ValueError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(1) from None
+            abort(str(exc))
 
     if status is not None:
         try:
             asset.status_id = resolve_status_label(client, status)
             has_changes = True
         except ValueError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(1) from None
+            abort(str(exc))
 
     if name is not None:
         asset.name = name
@@ -443,7 +430,7 @@ def update(
         has_changes = True
 
     if not has_changes:
-        console.print("[yellow]Warning:[/yellow] No fields to update.")
+        print_warning("No fields to update.")
         raise typer.Exit(0)
 
     if dry_run:
@@ -495,11 +482,9 @@ def price(
             try:
                 ram = float(raw)
             except ValueError:
-                console.print(f"[red]Error:[/red] Cannot parse RAM value '{raw}' from asset. Pass --ram.")
-                raise typer.Exit(1) from None
+                abort(f"Cannot parse RAM value '{raw}' from asset. Pass --ram.")
         else:
-            console.print("[red]Error:[/red] Asset has no RAM value. Pass --ram.")
-            raise typer.Exit(1)
+            abort("Asset has no RAM value. Pass --ram.")
 
     # Storage
     if storage_override is not None:
@@ -510,11 +495,9 @@ def price(
             try:
                 storage = float(raw)
             except ValueError:
-                console.print(f"[red]Error:[/red] Cannot parse storage value '{raw}' from asset. Pass --storage.")
-                raise typer.Exit(1) from None
+                abort(f"Cannot parse storage value '{raw}' from asset. Pass --storage.")
         else:
-            console.print("[red]Error:[/red] Asset has no storage value. Pass --storage.")
-            raise typer.Exit(1)
+            abort("Asset has no storage value. Pass --storage.")
 
     # Touch screen
     if touch_override is not None:
@@ -567,7 +550,7 @@ def price(
                     console.print(
                         f"  [yellow]Low confidence ({result['confidence']}% < {cfg.passmark.fuzzy_threshold}%)[/yellow]"
                     )
-                    accept = typer.confirm("  Accept this match?", default=False)
+                    accept = confirm("  Accept this match?", default=False)
                     if accept:
                         passmark_score = result["score"]
                         passmark_source = "csv_confirmed"
@@ -575,11 +558,10 @@ def price(
     # 4. No score resolved — abort
     if passmark_score is None:
         cpu_name = _get_custom_field_value(asset, cfg.custom_fields.cpu_model) or "unknown"
-        console.print(
-            f"[red]Error:[/red] Could not resolve PassMark score for '{cpu_name}'. "
+        abort(
+            f"Could not resolve PassMark score for '{cpu_name}'. "
             "Pass --passmark <score> to set it manually."
         )
-        raise typer.Exit(1)
 
     # ── Calculate ─────────────────────────────────────────────────────────
     breakdown = calculate_price(
@@ -659,8 +641,7 @@ def label(
     asset_tag = asset.asset_tag
 
     if not asset_tag:
-        console.print("[red]Error:[/red] Asset has no asset tag — cannot generate label.")
-        raise typer.Exit(1)
+        abort("Asset has no asset tag — cannot generate label.")
 
     try:
         save_path = client.assets.labels(output, [asset_tag])
@@ -754,8 +735,7 @@ def upload_file(
 
     for p in paths:
         if not os.path.isfile(p):
-            console.print(f"[red]Error:[/red] File not found: {p}")
-            raise typer.Exit(1)
+            abort(f"File not found: {p}")
 
     asset = _resolve_asset(client, id, tag, serial)
     asset_id = _require_int_id(asset)
@@ -831,8 +811,8 @@ def delete_file(
     asset_id = _require_int_id(asset)
 
     if not force:
-        confirm = typer.confirm(f"Are you sure you want to delete file {file_id} from asset {asset_id}?")
-        if not confirm:
+        confirmed = confirm(f"Are you sure you want to delete file {file_id} from asset {asset_id}?")
+        if not confirmed:
             console.print("[yellow]Aborted.[/yellow]")
             raise typer.Exit(0)
 

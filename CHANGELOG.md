@@ -5,6 +5,23 @@ inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 bumps for breaking changes or significant new features, patch bumps for fixes).
 
+## 0.3.1 — 2026-06-01
+
+### Bug fixes / behaviour
+
+- Human-facing success output now goes to stdout in normal CLI mode, while
+  errors and warnings remain on stderr.
+- `--json` output stays machine-readable across local validation failures,
+  no-op updates, and interactive confirmation prompts.
+- Verbose logging setup is idempotent, preventing duplicate log handlers in
+  repeated in-process CLI invocations.
+
+### Code quality
+
+- Centralized CLI output routing for data, status messages, warnings, errors,
+  and prompts.
+- Added regression coverage for JSON-safe model and asset command flows.
+
 ## 0.3.0 — 2026-05-27
 
 ### New features

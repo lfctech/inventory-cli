@@ -120,6 +120,21 @@ def test_get_json_output_machine_readable(
     assert payload["sale_price"] == "175"
 
 
+def test_get_json_validation_error_is_machine_readable(
+    runner: CliRunner, fake_env, reset_state, config_file
+) -> None:
+    result = runner.invoke(
+        app,
+        ["--config", str(config_file), "--json", "assets", "get"],
+    )
+
+    assert result.exit_code == 1
+    assert json.loads(strip_ansi(result.stdout)) == {
+        "error": "Provide one of --id, --tag, or --serial."
+    }
+    assert result.stderr == ""
+
+
 def test_get_not_found_surfaces_friendly_error(
     runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
 ) -> None:
@@ -171,7 +186,7 @@ def test_create_basic_no_custom_fields(
         ],
     )
     assert result.exit_code == 0, result.stderr
-    assert "Asset created" in result.stderr
+    assert "Asset created" in result.stdout
     assert "LFC-42" in result.stdout
 
     # Verify the POST body contained the resolved IDs.
@@ -229,7 +244,7 @@ def test_create_creates_missing_model_when_requested(
     )
 
     assert result.exit_code == 0, result.stderr
-    assert "Model created" in result.stderr
+    assert "Model created" in result.stdout
 
     posts = [r for r in httpx_mock.get_requests() if r.method == "POST"]
     assert len(posts) == 2
@@ -400,6 +415,28 @@ def test_update_no_changes_warns_and_exits_zero(
     assert "No fields to update" in result.stderr
 
 
+def test_update_no_changes_json_is_machine_readable(
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
+) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{TEST_URL}/api/v1/hardware/1",
+        json=asset_payload(asset_id=1),
+    )
+
+    result = runner.invoke(
+        app,
+        ["--config", str(config_file), "--json", "assets", "update", "--id", "1"],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(strip_ansi(result.stdout)) == {
+        "status": "warning",
+        "message": "No fields to update.",
+    }
+    assert result.stderr == ""
+
+
 def test_update_name_and_custom_field_patches_both(
     runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
 ) -> None:
@@ -502,7 +539,7 @@ def test_price_dry_run_does_not_patch(
         ["--config", str(config_file), "assets", "price", "--id", "1", "--dry-run"],
     )
     assert result.exit_code == 0, result.stderr
-    assert "Dry run" in result.stderr
+    assert "Dry run" in result.stdout
     # No PATCH should have been attempted.
     assert not [r for r in httpx_mock.get_requests() if r.method == "PATCH"]
 
@@ -603,6 +640,42 @@ def test_price_unresolved_passmark_errors_out(
     assert "could not resolve passmark score" in result.stderr.lower()
 
 
+def test_price_json_prompt_does_not_corrupt_stdout(
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock, monkeypatch
+) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{TEST_URL}/api/v1/hardware/1",
+        json=asset_payload(
+            asset_id=1,
+            asset_tag="LFC-1",
+            custom_fields={
+                "CPU": {"field": "_snipeit_cpu_1", "value": "Unknown-Super-CPU-3000"},
+                "CPU PassMark Score": {"field": "_snipeit_cpu_passmark_score_2", "value": ""},
+                "RAM (GB)": {"field": "_snipeit_ram_gb_3", "value": "16"},
+                "Storage (GB)": {"field": "_snipeit_storage_gb_4", "value": "512"},
+                "Sale Price": {"field": "_snipeit_sale_price_5", "value": ""},
+                "Touchscreen": {"field": "_snipeit_touchscreen_6", "value": "0"},
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "inventory.commands.assets.lookup_csv",
+        lambda _: {"score": 8000, "matched_cpu": "Some CPU", "confidence": 1},
+    )
+
+    result = runner.invoke(
+        app,
+        ["--config", str(config_file), "--json", "assets", "price", "--id", "1", "--dry-run"],
+        input="y\n",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    payload = json.loads(strip_ansi(result.stdout))
+    assert payload["passmark_source"] == "csv_confirmed"
+    assert "Accept this match?" in strip_ansi(result.stderr)
+
+
 # ── version subcommand ───────────────────────────────────────────────────────
 
 
@@ -696,3 +769,36 @@ def test_upload_rejects_nonexistent_file(
     assert "not found" in result.stderr.lower() or "not found" in strip_ansi(result.stderr).lower()
     # No requests should have been made (file check happens before API calls).
     assert not httpx_mock.get_requests()
+
+
+def test_file_delete_json_prompt_does_not_corrupt_stdout(
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
+) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{TEST_URL}/api/v1/hardware/1",
+        json=asset_payload(asset_id=1),
+    )
+    httpx_mock.add_response(
+        method="DELETE",
+        url=f"{TEST_URL}/api/v1/hardware/1/files/42/delete",
+        json={"status": "success"},
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--config", str(config_file),
+            "--json",
+            "assets",
+            "files",
+            "delete",
+            "--id", "1",
+            "--file-id", "42",
+        ],
+        input="y\n",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(strip_ansi(result.stdout)) == {"status": "success"}
+    assert "delete file 42" in strip_ansi(result.stderr)

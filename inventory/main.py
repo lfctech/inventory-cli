@@ -12,7 +12,6 @@ import logging
 from pathlib import Path
 
 import typer
-from rich.console import Console
 
 from . import __version__
 from .config import (
@@ -22,8 +21,7 @@ from .config import (
     load_config,
     resolve_config_path,
 )
-
-console = Console(stderr=True)
+from .console import abort, console
 
 app = typer.Typer(
     name="inventory",
@@ -71,19 +69,24 @@ def _configure_logging(verbose: int) -> None:
     if verbose <= 0:
         return
 
-    # Configure a stderr handler once so messages are visible without the
-    # caller having to do logging.basicConfig() themselves.
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-
     snipeit_logger = logging.getLogger("snipeit")
-    snipeit_logger.addHandler(handler)
+    if not any(getattr(h, "_inventory_cli_handler", False) for h in snipeit_logger.handlers):
+        snipeit_logger.addHandler(_log_handler())
     snipeit_logger.setLevel(logging.DEBUG if verbose >= 1 else logging.WARNING)
 
     if verbose >= 2:
         http_logger = logging.getLogger("snipeit.http")
-        http_logger.addHandler(handler)
+        if not any(getattr(h, "_inventory_cli_handler", False) for h in http_logger.handlers):
+            http_logger.addHandler(_log_handler())
         http_logger.setLevel(logging.DEBUG)
+
+
+def _log_handler() -> logging.Handler:
+    """Build the CLI stderr log handler."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    handler._inventory_cli_handler = True  # type: ignore[attr-defined]
+    return handler
 
 
 # ── Root callback (global options) ────────────────────────────────────────────
@@ -143,8 +146,7 @@ def main(
     try:
         resolved = resolve_config_path(config_path)
     except ValueError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1) from None
+        abort(str(exc))
     if resolved is None:
         # The `init` command doesn't need config — skip loading
         # We check for it inside commands that need it
@@ -152,8 +154,7 @@ def main(
     try:
         state.config = load_config(resolved)
     except ValueError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1) from None
+        abort(str(exc))
 
     # Apply config URL as fallback (flag/env take priority — already captured above)
     if state.url is None and state.config.snipeit.url:

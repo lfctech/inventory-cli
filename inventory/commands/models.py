@@ -9,30 +9,25 @@ from __future__ import annotations
 from typing import Any
 
 import typer
-from rich.console import Console
 from rich.table import Table
 from snipeit import SnipeIT
 from snipeit.exceptions import SnipeITException
 from snipeit.resources.models import Model
 
+from ..console import abort, confirm, console, out, print_warning
 from ..core.resolvers import resolve_category, resolve_fieldset, resolve_manufacturer, resolve_model
 from ..main import state
 from ._common import get_client, handle_api_error
 from ._lookup import ModelID, ModelName
-
-console = Console(stderr=True)
-out = Console()
 
 models_app = typer.Typer(no_args_is_help=True, rich_markup_mode="rich")
 
 
 def _resolve_target_model(client: SnipeIT, model_id: int | None, name: str | None) -> Model:
     if model_id is None and name is None:
-        console.print("[red]Error:[/red] Provide either --id or --name.")
-        raise typer.Exit(1)
+        abort("Provide either --id or --name.")
     if model_id is not None and name is not None:
-        console.print("[red]Error:[/red] Provide only one of --id or --name.")
-        raise typer.Exit(1)
+        abort("Provide only one of --id or --name.")
 
     try:
         if model_id is not None:
@@ -45,8 +40,7 @@ def _resolve_target_model(client: SnipeIT, model_id: int | None, name: str | Non
     except SnipeITException as exc:
         handle_api_error(exc, entity="Model")
     except ValueError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1) from None
+        abort(str(exc))
 
 
 def _extract_name(field: Any) -> str:
@@ -158,8 +152,7 @@ def create_model(
         mfg_id = resolve_manufacturer(client, manufacturer)
         fs_id = resolve_fieldset(client, fieldset) if fieldset is not None else None
     except ValueError as exc:
-        console.print(f"[red]Error:[/red] {exc}")
-        raise typer.Exit(1) from None
+        abort(str(exc))
 
     payload: dict[str, Any] = {
         "name": name,
@@ -176,8 +169,7 @@ def create_model(
     try:
         created = client.models.create(**payload)
         if created.id is None:
-            console.print("[red]Error:[/red] Model was created but the server returned no ID.")
-            raise typer.Exit(1)
+            abort("Model was created but the server returned no ID.")
         model = client.models.get(int(created.id))
     except SnipeITException as exc:
         handle_api_error(exc, entity="Model")
@@ -205,8 +197,7 @@ def update_model(
     target = _resolve_target_model(client, id, name)
     model_id = target.id
     if model_id is None:
-        console.print("[red]Error:[/red] Resolved model has no ID.")
-        raise typer.Exit(1)
+        abort("Resolved model has no ID.")
 
     payload: dict[str, Any] = {}
     if new_name is not None:
@@ -215,27 +206,24 @@ def update_model(
         try:
             payload["category_id"] = resolve_category(client, category)
         except ValueError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(1) from None
+            abort(str(exc))
     if manufacturer is not None:
         try:
             payload["manufacturer_id"] = resolve_manufacturer(client, manufacturer)
         except ValueError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(1) from None
+            abort(str(exc))
     if fieldset is not None:
         try:
             payload["fieldset_id"] = resolve_fieldset(client, fieldset)
         except ValueError as exc:
-            console.print(f"[red]Error:[/red] {exc}")
-            raise typer.Exit(1) from None
+            abort(str(exc))
     if model_number is not None:
         payload["model_number"] = model_number
     if notes is not None:
         payload["notes"] = notes
 
     if not payload:
-        console.print("[yellow]Warning:[/yellow] No fields to update.")
+        print_warning("No fields to update.")
         raise typer.Exit(0)
 
     try:
@@ -262,12 +250,13 @@ def delete_model(
     target = _resolve_target_model(client, id, name)
     model_id = target.id
     if model_id is None:
-        console.print("[red]Error:[/red] Resolved model has no ID.")
-        raise typer.Exit(1)
+        abort("Resolved model has no ID.")
 
     if not force:
-        confirm = typer.confirm(f"Are you sure you want to delete model {model_id} ({getattr(target, 'name', '')})?")
-        if not confirm:
+        confirmed = confirm(
+            f"Are you sure you want to delete model {model_id} ({getattr(target, 'name', '')})?"
+        )
+        if not confirmed:
             console.print("[yellow]Aborted.[/yellow]")
             raise typer.Exit(0)
 
