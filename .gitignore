@@ -7,5 +7,6 @@ wheels/
 *.egg-info
 .DS_Store
 .kiro/
+docker/api_key.txt
 # Virtual environments
 .venv
