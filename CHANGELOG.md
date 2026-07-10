@@ -5,6 +5,26 @@ inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 bumps for breaking changes or significant new features, patch bumps for fixes).
 
+## 0.3.2 — 2026-07-09
+
+### Tests and CI
+
+- **Live e2e integration suite** (`tests/e2e/`, marked `integration`): drives
+  the real CLI end-to-end against a throwaway, Dockerized Snipe-IT instance,
+  complementing the mocked unit tests (which by construction cannot catch
+  Snipe-IT API contract drift). Covers models create/get/list, assets
+  create/get/update, and the full `assets files` upload/list/download/delete
+  lifecycle.
+- **`docker/` dev stack**: Snipe-IT (pinned `v8.6.1-alpine`) + MariaDB + a
+  one-shot seeder that provisions an API key, plus a `WAIT_TIMEOUT`-configurable
+  readiness poll script.
+- **`Makefile`**: `test` (unit), `check` (ruff + pyright), `test-e2e`, and
+  `docker-*` lanes.
+- **`.github/workflows/ci.yml`**: new `e2e` job (`needs: test`) runs
+  `make test-e2e` on every PR, dumps Snipe-IT logs on failure, and always
+  tears the stack down. The fast lane now runs `pytest -m "not integration"`.
+- **`pytest.ini`**: registered the `integration` marker.
+
 ## 0.3.1 — 2026-06-01
 
 ### Bug fixes / behaviour
