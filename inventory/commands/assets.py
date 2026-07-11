@@ -16,6 +16,7 @@ from snipeit import SnipeIT
 from snipeit.exceptions import SnipeITException
 from snipeit.resources.assets import Asset
 
+from ..application import InventoryService
 from ..config import AppConfig
 from ..console import abort, confirm, console, out, print_warning
 from ..core.passmark import lookup_csv
@@ -54,20 +55,10 @@ def _resolve_asset(
     serial: str | None,
 ) -> Asset:
     """Resolve a single asset by ID, tag, or serial. Exits on failure."""
-    count = sum(1 for v in (asset_id, tag, serial) if v is not None)
-    if count == 0:
-        abort("Provide one of --id, --tag, or --serial.")
-    if count > 1:
-        abort("Provide only one of --id, --tag, or --serial.")
-
     try:
-        if asset_id is not None:
-            return client.assets.get(asset_id)
-        elif tag is not None:
-            return client.assets.get_by_tag(tag)
-        else:
-            assert serial is not None
-            return client.assets.get_by_serial(serial)
+        return InventoryService(client).resolve_asset(asset_id=asset_id, tag=tag, serial=serial)
+    except ValueError as exc:
+        abort(str(exc))
     except SnipeITException as exc:
         handle_api_error(exc, entity="Asset")
 
@@ -644,7 +635,7 @@ def label(
         abort("Asset has no asset tag — cannot generate label.")
 
     try:
-        save_path = client.assets.labels(output, [asset_tag])
+        save_path = InventoryService(client).save_label(asset, output)
         console.print(f"[green]✓[/green] Label saved to: {save_path}")
     except SnipeITException as exc:
         handle_api_error(exc, entity="Asset")
