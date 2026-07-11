@@ -72,3 +72,45 @@ def test_save_label_requires_asset_tag() -> None:
     client = Mock()
     with pytest.raises(ValueError, match="no asset tag"):
         InventoryService(client).save_label(SimpleNamespace(asset_tag=None), "label.pdf")
+
+
+def test_update_asset_rolls_back_new_model_when_save_fails(config_file) -> None:
+    from inventory.config import load_config
+
+    client = Mock()
+    client.models.create.return_value = SimpleNamespace(id=3)
+    asset = Mock()
+    asset.save.side_effect = SnipeITValidationError("invalid update")
+    spec = NewModel(name="Model", category_id=1, manufacturer_id=2)
+
+    with pytest.raises(SnipeITValidationError):
+        InventoryService(client).update_asset(
+            asset,
+            load_config(config_file),
+            {"name": "Changed"},
+            new_model=spec,
+        )
+
+    client.models.delete.assert_called_once_with(3)
+    client.manufacturers.delete.assert_not_called()
+
+
+def test_update_does_not_roll_back_when_refresh_fails_after_save(config_file) -> None:
+    from inventory.config import load_config
+
+    client = Mock()
+    client.models.create.return_value = SimpleNamespace(id=3)
+    asset = Mock()
+    asset.refresh.side_effect = SnipeITValidationError("refresh failed")
+    spec = NewModel(name="Model", category_id=1, manufacturer_id=2)
+
+    updated, _ = InventoryService(client).update_asset(
+        asset,
+        load_config(config_file),
+        {"name": "Changed"},
+        new_model=spec,
+    )
+
+    assert updated is asset
+    asset.save.assert_called_once_with()
+    client.models.delete.assert_not_called()

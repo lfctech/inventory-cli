@@ -27,6 +27,7 @@ app = typer.Typer(
     name="inventory",
     help="Snipe-IT inventory management CLI.",
     no_args_is_help=True,
+    invoke_without_command=True,
     rich_markup_mode="rich",
 )
 
@@ -93,6 +94,7 @@ def _log_handler() -> logging.Handler:
 
 @app.callback()
 def main(
+    ctx: typer.Context,
     url: str | None = typer.Option(
         None,
         "--url",
@@ -126,6 +128,12 @@ def main(
         count=True,
         help="Increase log verbosity. -v: snipeit warnings/info; -vv: include HTTP trace.",
     ),
+    interactive_mode: bool = typer.Option(
+        False,
+        "--interactive",
+        "-i",
+        help="Launch guided interactive mode.",
+    ),
     _version: bool | None = typer.Option(
         None,
         "--version",
@@ -137,6 +145,7 @@ def main(
     """Snipe-IT inventory management CLI."""
     state.url = url
     state.api_key = api_key
+    state.config = None
     state.json_output = json_output
     state.verbose = verbose
 
@@ -150,6 +159,10 @@ def main(
     if resolved is None:
         # The `init` command doesn't need config — skip loading
         # We check for it inside commands that need it
+        if interactive_mode and ctx.invoked_subcommand is None:
+            from .interactive import run_interactive
+
+            run_interactive()
         return
     try:
         state.config = load_config(resolved)
@@ -159,6 +172,11 @@ def main(
     # Apply config URL as fallback (flag/env take priority — already captured above)
     if state.url is None and state.config.snipeit.url:
         state.url = state.config.snipeit.url
+
+    if interactive_mode and ctx.invoked_subcommand is None:
+        from .interactive import run_interactive
+
+        run_interactive()
 
 
 # ── Init command ──────────────────────────────────────────────────────────────
@@ -200,6 +218,14 @@ def init(
 def version() -> None:
     """Show the inventory CLI version."""
     typer.echo(f"inventory {__version__}")
+
+
+@app.command("interactive")
+def interactive_command() -> None:
+    """Launch guided workflows for common inventory operations."""
+    from .interactive import run_interactive
+
+    run_interactive()
 
 
 # ── Mount subcommand groups ──────────────────────────────────────────────────

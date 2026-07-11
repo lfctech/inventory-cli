@@ -11,6 +11,8 @@ from snipeit.exceptions import SnipeITException, SnipeITNotFoundError
 from snipeit.resources.assets import Asset
 from snipeit.resources.models import Model
 
+from .config import AppConfig
+
 
 @dataclass(frozen=True)
 class AssetMatches:
@@ -171,8 +173,55 @@ class InventoryService:
 
     def save_asset(self, asset: Asset) -> Asset:
         asset.save()
-        asset.refresh()
+        try:
+            asset.refresh()
+        except SnipeITException:
+            # The write already succeeded. Keep the locally updated object rather
+            # than reporting failure or rolling back resources it may now use.
+            pass
         return asset
+
+    def update_asset(
+        self,
+        asset: Asset,
+        config: AppConfig,
+        changes: dict[str, Any],
+        *,
+        model_id: int | None = None,
+        new_model: NewModel | None = None,
+    ) -> tuple[Asset, CreatedResources]:
+        """Apply interactive edits, rolling back a newly-created model on failure."""
+        created = CreatedResources()
+        try:
+            if new_model is not None:
+                model_id = self._create_model(new_model, created)
+            if model_id is not None:
+                asset.model_id = model_id
+            if "status_id" in changes:
+                asset.status_id = changes["status_id"]
+            if "name" in changes:
+                asset.name = changes["name"]
+
+            labels = {
+                "cpu": config.custom_fields.cpu_model,
+                "ram": config.custom_fields.ram,
+                "storage": config.custom_fields.storage,
+                "touch_screen": config.custom_fields.touch_screen,
+                "passmark": config.custom_fields.cpu_passmark,
+                "sale_price": config.custom_fields.sale_price,
+            }
+            for key, label in labels.items():
+                if key in changes:
+                    asset.set_custom_field(label, changes[key])
+            asset.save()
+        except Exception:
+            self.rollback(created)
+            raise
+        try:
+            asset.refresh()
+        except SnipeITException:
+            pass
+        return asset, created
 
     def save_label(self, asset: Asset, output: str | Path) -> str:
         if not asset.asset_tag:
