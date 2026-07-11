@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from typer.testing import CliRunner
@@ -79,6 +81,96 @@ def test_interactive_flag_rejects_subcommand(runner: CliRunner, fake_env, reset_
 
     assert result.exit_code == 2
     assert "--interactive cannot be combined with a subcommand" in result.output
+
+
+def test_enhanced_menu_uses_keyboard_select_and_back_choice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inventory import interactive
+
+    prompt = Mock()
+    prompt.execute.return_value = 1
+    select = Mock(return_value=prompt)
+    api = SimpleNamespace(select=select, fuzzy=Mock())
+    monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
+    monkeypatch.setattr(interactive, "_inquirer", api)
+
+    assert interactive._choose("Menu", ["First", "Second"]) == 1
+
+    choices = select.call_args.kwargs["choices"]
+    assert [choice.name for choice in choices] == ["First", "Second", "← Back"]
+    assert "↑/↓" in select.call_args.kwargs["instruction"]
+
+
+def test_enhanced_menu_uses_fuzzy_filter_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inventory import interactive
+
+    prompt = Mock()
+    prompt.execute.return_value = 0
+    fuzzy = Mock(return_value=prompt)
+    api = SimpleNamespace(select=Mock(), fuzzy=fuzzy)
+    monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
+    monkeypatch.setattr(interactive, "_inquirer", api)
+
+    assert interactive._choose("Fields", ["One", "Two"], fuzzy=True) == 0
+    fuzzy.assert_called_once()
+
+
+def test_page_clears_and_redraws_in_enhanced_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    from inventory import interactive
+
+    clear = Mock()
+    monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
+    monkeypatch.setattr(interactive.console, "clear", clear)
+
+    interactive._page("Asset details", "LFC-1")
+
+    clear.assert_called_once_with()
+
+
+def test_enhanced_menu_back_choice_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    from inventory import interactive
+
+    prompt = Mock()
+    prompt.execute.return_value = None
+    api = SimpleNamespace(select=Mock(return_value=prompt), fuzzy=Mock())
+    monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
+    monkeypatch.setattr(interactive, "_inquirer", api)
+
+    assert interactive._choose("Menu", ["Continue"]) is None
+
+
+def test_enhanced_text_back_redraws_current_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    from inventory import interactive
+
+    prompt = Mock()
+    prompt.execute.return_value = ":back"
+    api = SimpleNamespace(text=Mock(return_value=prompt))
+    redraw = Mock()
+    monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
+    monkeypatch.setattr(interactive, "_inquirer", api)
+    monkeypatch.setattr(interactive, "_redraw_page", redraw)
+
+    assert interactive._prompt("Serial") is interactive.BACK
+    redraw.assert_called_once_with()
+
+
+def test_enhanced_confirmation_delegates_to_inquirer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inventory import interactive
+
+    prompt = Mock()
+    prompt.execute.return_value = True
+    confirm = Mock(return_value=prompt)
+    api = SimpleNamespace(confirm=confirm)
+    monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
+    monkeypatch.setattr(interactive, "_inquirer", api)
+
+    assert interactive._confirm("Continue?", default=True) is True
+    assert confirm.call_args.kwargs["default"] is True
 
 
 def test_find_uses_one_prompt_for_tag_and_serial(

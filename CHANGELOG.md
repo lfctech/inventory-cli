@@ -16,6 +16,9 @@ bumps for breaking changes or significant new features, patch bumps for fixes).
   review screens, contextual follow-up actions, and safe label filenames.
 - Added best-effort reverse-order rollback for manufacturers and models created
   by a failed multi-step interactive operation.
+- Polished interactive mode with arrow-key menus, fuzzy filtering for long
+  choice lists, consistent screen transitions, clearer page context, and
+  keyboard-aware confirmations and text entry.
 
 ### Code quality
 

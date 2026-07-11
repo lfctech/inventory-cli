@@ -8,6 +8,8 @@ from typing import Any
 
 import typer
 from click import Abort
+from InquirerPy import inquirer
+from InquirerPy.base.control import Choice
 from rich.table import Table
 from snipeit.exceptions import (
     SnipeITAuthenticationError,
@@ -21,31 +23,108 @@ from snipeit.exceptions import (
 from snipeit.resources.assets import Asset
 
 from .application import InventoryService, NewModel, TransactionError
-from .commands._common import get_client
 from .config import DEFAULT_CONFIG_TEMPLATE, _xdg_config_path
 from .console import console
 from .main import state
 
 BACK = object()
+_inquirer: Any = inquirer
+_current_page: tuple[str, str | None] | None = None
 
 
-def _is_tty() -> bool:
+def _streams_are_tty() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
+def _is_tty() -> bool:
+    return _streams_are_tty()
+
+
+def _enhanced_prompts() -> bool:
+    """Use full-screen prompts only with a real terminal (tests use pipes)."""
+    return _streams_are_tty()
+
+
+def _page(title: str, subtitle: str | None = None) -> None:
+    global _current_page
+
+    _current_page = (title, subtitle)
+    _redraw_page()
+
+
+def _redraw_page() -> None:
+    if _enhanced_prompts():
+        console.clear()
+    if _current_page is None:
+        return
+    title, subtitle = _current_page
+    console.print("[bold cyan]INVENTORY[/bold cyan]  [dim]Snipe-IT guided mode[/dim]")
+    console.print(f"[bold]{title}[/bold]")
+    if subtitle:
+        console.print(f"[dim]{subtitle}[/dim]")
+    console.print()
+
+
 def _prompt(text: str, *, default: str | None = None, allow_empty: bool = False) -> str | object:
-    value = typer.prompt(text, default=default, show_default=default is not None)
-    value = value.strip()
-    if value == ":back":
-        return BACK
-    if not value and not allow_empty:
+    while True:
+        if _enhanced_prompts():
+            value = _inquirer.text(
+                message=text,
+                default=default or "",
+                instruction="(:back to go back)",
+                mandatory=not allow_empty,
+                mandatory_message="Enter a value, or type :back.",
+                qmark=">",
+                amark="✓",
+            ).execute()
+        else:
+            value = typer.prompt(text, default=default, show_default=default is not None)
+        value = str(value).strip()
+        if value == ":back":
+            if _enhanced_prompts():
+                _redraw_page()
+            return BACK
+        if value or allow_empty:
+            if _enhanced_prompts():
+                _redraw_page()
+            return value
         console.print("[yellow]A value is required. Enter :back to go back.[/yellow]")
-        return _prompt(text, default=default, allow_empty=allow_empty)
-    return value
 
 
-def _choose(title: str, options: list[str], *, back: bool = True) -> int | None:
-    console.print(f"\n[bold]{title}[/bold]")
+def _choose(
+    title: str,
+    options: list[str],
+    *,
+    back: bool = True,
+    clear: bool = True,
+    subtitle: str | None = None,
+    fuzzy: bool = False,
+) -> int | None:
+    if clear:
+        _page(title, subtitle)
+    if _enhanced_prompts():
+        choices = [Choice(index, name=option) for index, option in enumerate(options)]
+        if back:
+            choices.append(Choice(None, name="← Back"))
+        use_fuzzy = fuzzy
+        prompt = _inquirer.fuzzy if use_fuzzy else _inquirer.select
+        kwargs: dict[str, Any] = {
+            "message": "Choose an option",
+            "choices": choices,
+            "instruction": "(↑/↓ move • Enter select)",
+            "pointer": ">",
+            "qmark": ">",
+            "amark": "✓",
+            "cycle": True,
+            "raise_keyboard_interrupt": True,
+        }
+        if use_fuzzy:
+            kwargs["border"] = True
+            kwargs["info"] = False
+        return prompt(**kwargs).execute()
+
+    if not clear:
+        console.print(f"\n[bold]{title}[/bold]")
     for index, option in enumerate(options, 1):
         console.print(f"  {index}. {option}")
     if back:
@@ -61,6 +140,20 @@ def _choose(title: str, options: list[str], *, back: bool = True) -> int | None:
         if 1 <= selected <= len(options):
             return selected - 1
         console.print("[yellow]Choose one of the listed numbers.[/yellow]")
+
+
+def _confirm(message: str, *, default: bool = False) -> bool:
+    if _enhanced_prompts():
+        return bool(
+            _inquirer.confirm(
+                message=message,
+                default=default,
+                instruction="(Y/n)" if default else "(y/N)",
+                qmark=">",
+                amark="✓",
+            ).execute()
+        )
+    return typer.confirm(message, default=default)
 
 
 def _name(item: Any) -> str:
@@ -105,12 +198,12 @@ class InteractiveSession:
                     break
                 except SnipeITException as exc:
                     console.print(f"[red]Error:[/red] {_api_message(exc)}")
-                    retry = _choose("What next?", ["Retry this workflow"])
+                    retry = _choose("What next?", ["Retry this workflow"], clear=False)
                     if retry is None:
                         break
                 except (ValueError, RuntimeError) as exc:
                     console.print(f"[red]Error:[/red] {exc}")
-                    retry = _choose("What next?", ["Retry this workflow"])
+                    retry = _choose("What next?", ["Retry this workflow"], clear=False)
                     if retry is None:
                         break
 
@@ -127,10 +220,12 @@ class InteractiveSession:
             console.print("[dim]Any model/manufacturer created by this operation was rolled back.[/dim]")
 
     def lookup(self) -> Asset | None:
+        _page("Find an asset", "Scan a barcode or enter an exact asset tag or serial number.")
         while True:
             identifier = _prompt("Scan or enter asset tag/serial")
             if identifier is BACK:
                 return None
+            console.print("[dim]Searching by asset tag and serial…[/dim]")
             matches = self.service.find_asset(str(identifier)).unique
             if not matches:
                 console.print("[yellow]No asset found. Try again or enter :back.[/yellow]")
@@ -148,8 +243,9 @@ class InteractiveSession:
         if asset is None:
             return
         while True:
+            _page("Asset details", _asset_label(asset))
             _print_asset(asset, self.config)
-            choice = _choose("What next?", ["Update this asset", "Save its label"])
+            choice = _choose("What next?", ["Update this asset", "Save its label"], clear=False)
             if choice is None:
                 return
             if choice == 0:
@@ -164,11 +260,12 @@ class InteractiveSession:
         status = self.pick_resource("status_labels", "Search status labels", allow_create=False)
         if status is BACK:
             return
+        _page("Add an asset", "Snipe-IT will assign the asset tag automatically.")
         serial_value = _prompt("Scan or enter serial number", allow_empty=True)
         if serial_value is BACK:
             return
         serial = str(serial_value) or None
-        if serial is None and not typer.confirm("Serial is blank. Create the asset anyway?", default=False):
+        if serial is None and not _confirm("Serial is blank. Create the asset anyway?", default=False):
             return
 
         rows = [
@@ -185,8 +282,9 @@ class InteractiveSession:
                 ("Model number", model.model_number or "(blank)"),
                 ("Model notes", model.notes or "(blank)"),
             ]
+        _page("Review new asset", "Nothing has been written yet.")
         _print_review("Create Asset", rows)
-        if not typer.confirm("Create this asset?", default=False):
+        if not _confirm("Create this asset?", default=False):
             return
         kwargs: dict[str, Any] = {"status_id": int(status.id), "serial": serial}
         if isinstance(model, NewModel):
@@ -196,22 +294,25 @@ class InteractiveSession:
         asset, created = self.service.create_asset(**kwargs)
         for error in created.rollback_errors:
             console.print(f"[yellow]{error}[/yellow]")
-        console.print(f"[green]✓[/green] Asset created: {asset.asset_tag}")
+        _page("Asset created")
+        console.print(f"[green]✓[/green] Asset created: [bold]{asset.asset_tag}[/bold]")
         self._after_add(asset)
 
     def _after_add(self, asset: Asset) -> None:
         while True:
-            choice = _choose("What next?", ["Save its label", "View the full asset"])
+            choice = _choose("What next?", ["Save its label", "View the full asset"], clear=False)
             if choice is None:
                 return
             if choice == 0:
                 self.save_label(asset)
             else:
+                _page("Asset details", _asset_label(asset))
                 _print_asset(asset, self.config)
 
     def update_asset(self) -> None:
         asset = self.lookup()
         if asset is not None:
+            _page("Update asset", _asset_label(asset))
             _print_asset(asset, self.config)
             self.edit_asset(asset)
 
@@ -225,7 +326,12 @@ class InteractiveSession:
                     "Model", "Status", "Name", "CPU", "RAM", "Storage",
                     "Touch screen", "PassMark", "Sale price", "Review changes",
                 ]
-                choice = _choose("Edit fields", options)
+                staged = len(review_values)
+                choice = _choose(
+                    "Update asset",
+                    options,
+                    subtitle=f"{_asset_label(asset)}  •  {staged} staged change{'s' if staged != 1 else ''}",
+                )
                 if choice is None:
                     return asset
                 if choice == 9:
@@ -251,8 +357,9 @@ class InteractiveSession:
             if not changes and model is None:
                 console.print("[yellow]No changes selected.[/yellow]")
                 continue
+            _page("Review changes", "Nothing has been written yet.")
             _print_update_review(asset, self.config, review_values)
-            if not typer.confirm("Save these changes?", default=False):
+            if not _confirm("Save these changes?", default=False):
                 continue
             kwargs: dict[str, Any] = {"changes": changes}
             if isinstance(model, NewModel):
@@ -262,9 +369,10 @@ class InteractiveSession:
             asset, created = self.service.update_asset(asset, self.config, **kwargs)
             for error in created.rollback_errors:
                 console.print(f"[yellow]{error}[/yellow]")
-            console.print(f"[green]✓[/green] Asset {asset.asset_tag or asset.id} updated.")
+            _page("Asset updated", _asset_label(asset))
+            console.print(f"[green]✓[/green] Asset [bold]{asset.asset_tag or asset.id}[/bold] updated.")
             _print_asset(asset, self.config)
-            action = _choose("What next?", ["Save its label", "Make another update"])
+            action = _choose("What next?", ["Save its label", "Make another update"], clear=False)
             if action is None:
                 return asset
             if action == 0:
@@ -296,30 +404,35 @@ class InteractiveSession:
     def label_asset(self) -> None:
         asset = self.lookup()
         if asset is not None:
+            _page("Save asset label", _asset_label(asset))
             _print_asset(asset, self.config)
-            if typer.confirm("Save a label for this asset?", default=True):
+            if _confirm("Save a label for this asset?", default=True):
                 self.save_label(asset)
 
     def save_label(self, asset: Asset) -> None:
         default = f"./label-{asset.asset_tag}.pdf"
+        _page("Save asset label", _asset_label(asset))
         while True:
             output = _prompt("Output path", default=default)
             if output is BACK:
                 return
             path = Path(str(output)).expanduser()
-            if not path.exists() or typer.confirm(f"{path} exists. Overwrite it?", default=False):
+            if not path.exists() or _confirm(f"{path} exists. Overwrite it?", default=False):
                 break
             console.print("[dim]Enter another output path, or :back to cancel.[/dim]")
         saved = self.service.save_label(asset, path)
-        console.print(f"[green]✓[/green] Label saved to: {saved}")
+        _page("Label saved")
+        console.print(f"[green]✓[/green] Label saved to: [bold]{saved}[/bold]")
 
     def pick_model(self) -> Any:
         return self.pick_resource("models", "Search models", allow_create=True)
 
     def pick_resource(self, resource: str, prompt: str, *, allow_create: bool) -> Any:
+        _page(prompt, "Type a search term. Enter :back to return.")
         query = _prompt(prompt)
         if query is BACK:
             return BACK
+        console.print("[dim]Searching Snipe-IT…[/dim]")
         results = self.service.search(resource, str(query))
         labels = [_resource_label(item) for item in results]
         if allow_create:
@@ -327,7 +440,12 @@ class InteractiveSession:
         if not labels:
             console.print("[yellow]No matches found.[/yellow]")
             return BACK
-        selected = _choose("Matches", labels)
+        selected = _choose(
+            "Matches",
+            labels,
+            subtitle="Type to filter • ↑/↓ move • Enter select",
+            fuzzy=True,
+        )
         if selected is None:
             return BACK
         if allow_create and selected == len(results):
@@ -335,6 +453,7 @@ class InteractiveSession:
         return results[selected]
 
     def new_model(self, suggested_name: str) -> NewModel | object:
+        _page("Create a new model", "The model will be created only after the final asset review.")
         name = _prompt("Model name", default=suggested_name)
         if name is BACK:
             return BACK
@@ -352,10 +471,11 @@ class InteractiveSession:
             return BACK
         fieldset_id: int | None = None
         fieldset: Any = None
-        if typer.confirm("Select a fieldset?", default=False):
+        if _confirm("Select a fieldset?", default=False):
             fieldset = self.pick_resource("fieldsets", "Search fieldsets", allow_create=False)
             if fieldset is not BACK:
                 fieldset_id = int(fieldset.id)
+        _page("Create a new model", "Optional model details. Enter :back to cancel.")
         model_number = _prompt("Model number", allow_empty=True)
         if model_number is BACK:
             return BACK
@@ -372,6 +492,7 @@ class InteractiveSession:
         )
 
     def pick_manufacturer(self) -> Any:
+        _page("Choose manufacturer", "Search existing manufacturers or create a new one.")
         query = _prompt("Search manufacturers")
         if query is BACK:
             return BACK
@@ -379,6 +500,8 @@ class InteractiveSession:
         selected = _choose(
             "Matches",
             [_resource_label(item) for item in results] + ["Create a new manufacturer"],
+            subtitle="Type to filter • ↑/↓ move • Enter select",
+            fuzzy=True,
         )
         if selected is None:
             return BACK
@@ -389,6 +512,8 @@ class InteractiveSession:
 
 
 def run_interactive() -> None:
+    from .commands._common import get_client
+
     if state.json_output:
         raise typer.BadParameter("--json cannot be used with interactive mode.")
     if not _is_tty():
@@ -396,7 +521,7 @@ def run_interactive() -> None:
     if state.config is None:
         target = _xdg_config_path()
         console.print("[yellow]No config.toml was found.[/yellow]")
-        if typer.confirm(f"Create a starter config at {target}?", default=True):
+        if _confirm(f"Create a starter config at {target}?", default=True):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(DEFAULT_CONFIG_TEMPLATE)
             console.print(f"[green]✓[/green] Config written to: {target}")

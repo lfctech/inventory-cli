@@ -130,8 +130,10 @@ update an asset, and save an asset label. Asset lookup uses one scan/input
 prompt and checks both exact asset tags and exact serial numbers. Model,
 manufacturer, category, fieldset, and status choices are searchable.
 
-Use `0` in numbered menus or enter `:back` at text prompts to go back. Press
-`Ctrl+C` to exit. Interactive mode requires a terminal and cannot be combined
+Use the arrow keys to move through menus and press Enter to select. Longer
+lists support type-to-filter fuzzy search. Choose `← Back` in menus or enter
+`:back` at text prompts to go back; press `Ctrl+C` to exit. Interactive mode
+clears the terminal between screens, requires a TTY, and cannot be combined
 with `--json`; all other global connection and verbosity options work normally.
 
 When adding an asset, Snipe-IT auto-assigns the asset tag. Creating a missing
