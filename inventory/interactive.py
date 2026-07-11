@@ -20,7 +20,7 @@ from snipeit.exceptions import (
 )
 from snipeit.resources.assets import Asset
 
-from .application import InventoryService, NewModel
+from .application import InventoryService, NewModel, TransactionError
 from .commands._common import get_client
 from .config import DEFAULT_CONFIG_TEMPLATE, _xdg_config_path
 from .console import console
@@ -86,19 +86,45 @@ class InteractiveSession:
             )
             if choice == 4:
                 return
-            try:
-                if choice == 0:
-                    self.find_asset()
-                elif choice == 1:
-                    self.add_asset()
-                elif choice == 2:
-                    self.update_asset()
-                elif choice == 3:
-                    self.label_asset()
-            except SnipeITException as exc:
-                console.print(f"[red]Error:[/red] {_api_message(exc)}")
-            except (ValueError, RuntimeError) as exc:
-                console.print(f"[red]Error:[/red] {exc}")
+            while True:
+                try:
+                    if choice == 0:
+                        self.find_asset()
+                    elif choice == 1:
+                        self.add_asset()
+                    elif choice == 2:
+                        self.update_asset()
+                    elif choice == 3:
+                        self.label_asset()
+                    break
+                except TransactionError as exc:
+                    self._print_transaction_error(exc)
+                    break
+                except SnipeITAuthenticationError as exc:
+                    console.print(f"[red]Error:[/red] {_api_message(exc)}")
+                    break
+                except SnipeITException as exc:
+                    console.print(f"[red]Error:[/red] {_api_message(exc)}")
+                    retry = _choose("What next?", ["Retry this workflow"])
+                    if retry is None:
+                        break
+                except (ValueError, RuntimeError) as exc:
+                    console.print(f"[red]Error:[/red] {exc}")
+                    retry = _choose("What next?", ["Retry this workflow"])
+                    if retry is None:
+                        break
+
+    def _print_transaction_error(self, exc: TransactionError) -> None:
+        if isinstance(exc.cause, SnipeITException):
+            message = _api_message(exc.cause)
+        else:
+            message = str(exc.cause)
+        console.print(f"[red]Error:[/red] {message}")
+        if exc.rollback_errors:
+            for error in exc.rollback_errors:
+                console.print(f"[yellow]Rollback warning:[/yellow] {error}")
+        else:
+            console.print("[dim]Any model/manufacturer created by this operation was rolled back.[/dim]")
 
     def lookup(self) -> Asset | None:
         while True:
@@ -151,6 +177,14 @@ class InteractiveSession:
             ("Serial", serial or "(blank)"),
             ("Asset tag", "Auto-assigned by Snipe-IT"),
         ]
+        if isinstance(model, NewModel):
+            rows[1:1] = [
+                ("New manufacturer", model.manufacturer_display or "(existing)"),
+                ("Category", model.category_name or str(model.category_id)),
+                ("Fieldset", model.fieldset_name or "(none)"),
+                ("Model number", model.model_number or "(blank)"),
+                ("Model notes", model.notes or "(blank)"),
+            ]
         _print_review("Create Asset", rows)
         if not typer.confirm("Create this asset?", default=False):
             return
@@ -268,12 +302,14 @@ class InteractiveSession:
 
     def save_label(self, asset: Asset) -> None:
         default = f"./label-{asset.asset_tag}.pdf"
-        output = _prompt("Output path", default=default)
-        if output is BACK:
-            return
-        path = Path(str(output)).expanduser()
-        if path.exists() and not typer.confirm(f"{path} exists. Overwrite it?", default=False):
-            return
+        while True:
+            output = _prompt("Output path", default=default)
+            if output is BACK:
+                return
+            path = Path(str(output)).expanduser()
+            if not path.exists() or typer.confirm(f"{path} exists. Overwrite it?", default=False):
+                break
+            console.print("[dim]Enter another output path, or :back to cancel.[/dim]")
         saved = self.service.save_label(asset, path)
         console.print(f"[green]✓[/green] Label saved to: {saved}")
 
@@ -315,6 +351,7 @@ class InteractiveSession:
         if category is BACK:
             return BACK
         fieldset_id: int | None = None
+        fieldset: Any = None
         if typer.confirm("Select a fieldset?", default=False):
             fieldset = self.pick_resource("fieldsets", "Search fieldsets", allow_create=False)
             if fieldset is not BACK:
@@ -329,6 +366,9 @@ class InteractiveSession:
             name=str(name), category_id=int(category.id), manufacturer_id=manufacturer_id,
             manufacturer_name=manufacturer_name, fieldset_id=fieldset_id,
             model_number=str(model_number) or None, notes=str(notes) or None,
+            category_name=_name(category),
+            manufacturer_display=manufacturer_name or _name(manufacturer),
+            fieldset_name=_name(fieldset) if fieldset_id is not None else None,
         )
 
     def pick_manufacturer(self) -> Any:

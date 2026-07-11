@@ -10,7 +10,7 @@ import pytest
 from snipeit.exceptions import SnipeITApiError, SnipeITNotFoundError, SnipeITValidationError
 from snipeit.resources.assets import Asset
 
-from inventory.application import InventoryService, NewModel
+from inventory.application import InventoryService, NewModel, TransactionError
 
 pytestmark = pytest.mark.unit
 
@@ -61,9 +61,10 @@ def test_create_asset_rolls_back_new_model_and_manufacturer_on_failure() -> None
     client.assets.create.side_effect = SnipeITValidationError("invalid asset")
     spec = NewModel(name="Model", category_id=1, manufacturer_name="New Mfg")
 
-    with pytest.raises(SnipeITValidationError):
+    with pytest.raises(TransactionError) as raised:
         InventoryService(client).create_asset(status_id=4, serial="SN", new_model=spec)
 
+    assert isinstance(raised.value.cause, SnipeITValidationError)
     client.models.delete.assert_called_once_with(3)
     client.manufacturers.delete.assert_called_once_with(2)
 
@@ -72,7 +73,7 @@ def test_create_asset_does_not_delete_preexisting_records_on_failure() -> None:
     client = Mock()
     client.assets.create.side_effect = SnipeITValidationError("invalid asset")
 
-    with pytest.raises(SnipeITValidationError):
+    with pytest.raises(TransactionError):
         InventoryService(client).create_asset(status_id=4, serial="SN", model_id=9)
 
     client.models.delete.assert_not_called()
@@ -95,7 +96,7 @@ def test_update_asset_rolls_back_new_model_when_save_fails(config_file) -> None:
     asset.save.side_effect = SnipeITValidationError("invalid update")
     spec = NewModel(name="Model", category_id=1, manufacturer_id=2)
 
-    with pytest.raises(SnipeITValidationError):
+    with pytest.raises(TransactionError):
         InventoryService(client).update_asset(
             asset,
             load_config(config_file),
@@ -105,6 +106,21 @@ def test_update_asset_rolls_back_new_model_when_save_fails(config_file) -> None:
 
     client.models.delete.assert_called_once_with(3)
     client.manufacturers.delete.assert_not_called()
+
+
+def test_transaction_error_preserves_rollback_failures() -> None:
+    client = Mock()
+    client.manufacturers.create.return_value = SimpleNamespace(id=2)
+    client.models.create.return_value = SimpleNamespace(id=3)
+    client.assets.create.side_effect = SnipeITValidationError("invalid asset")
+    client.models.delete.side_effect = SnipeITValidationError("model in use")
+    spec = NewModel(name="Model", category_id=1, manufacturer_name="New Mfg")
+
+    with pytest.raises(TransactionError) as raised:
+        InventoryService(client).create_asset(status_id=4, serial="SN", new_model=spec)
+
+    assert raised.value.rollback_errors
+    assert "Could not delete model 3" in raised.value.rollback_errors[0]
 
 
 def test_update_does_not_roll_back_when_refresh_fails_after_save(config_file) -> None:

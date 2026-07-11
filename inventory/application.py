@@ -9,7 +9,6 @@ from typing import Any
 from snipeit import SnipeIT
 from snipeit.exceptions import SnipeITApiError, SnipeITException, SnipeITNotFoundError
 from snipeit.resources.assets import Asset
-from snipeit.resources.models import Model
 
 from .config import AppConfig
 
@@ -44,6 +43,9 @@ class NewModel:
     fieldset_id: int | None = None
     model_number: str | None = None
     notes: str | None = None
+    category_name: str | None = None
+    manufacturer_display: str | None = None
+    fieldset_name: str | None = None
 
 
 @dataclass
@@ -53,6 +55,15 @@ class CreatedResources:
     model_id: int | None = None
     manufacturer_id: int | None = None
     rollback_errors: list[str] = field(default_factory=list)
+
+
+class TransactionError(RuntimeError):
+    """An operation failed after creating records that required rollback."""
+
+    def __init__(self, cause: Exception, rollback_errors: list[str]) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.rollback_errors = rollback_errors
 
 
 class InventoryService:
@@ -125,18 +136,9 @@ class InventoryService:
             if asset.id is None:
                 raise RuntimeError("Asset was created but the server returned no ID.")
             return asset, created
-        except Exception:
+        except Exception as exc:
             self.rollback(created)
-            raise
-
-    def create_model(self, spec: NewModel) -> tuple[Model, CreatedResources]:
-        created = CreatedResources()
-        try:
-            model_id = self._create_model(spec, created)
-            return self.client.models.get(model_id), created
-        except Exception:
-            self.rollback(created)
-            raise
+            raise TransactionError(exc, created.rollback_errors) from exc
 
     def _create_model(self, spec: NewModel, created: CreatedResources) -> int:
         manufacturer_id = spec.manufacturer_id
@@ -212,9 +214,9 @@ class InventoryService:
                     value = changes[key]
                     asset.set_custom_field(label, "" if value == "" else str(value))
             asset.save()
-        except Exception:
+        except Exception as exc:
             self.rollback(created)
-            raise
+            raise TransactionError(exc, created.rollback_errors) from exc
         try:
             asset.refresh()
         except SnipeITException:
