@@ -28,6 +28,18 @@ uv sync
 uv run inventory --help
 ```
 
+### Tests
+
+```bash
+make test      # Fast mocked unit/CLI tests
+make check     # Ruff lint + Pyright
+make test-e2e  # Live Snipe-IT smoke tests via local Docker
+```
+
+The e2e lane starts a throwaway Snipe-IT stack on `http://localhost:8010`,
+waits for an authenticated API check, then runs the live CLI smoke tests.
+Use `make docker-down` to stop the stack and delete its volumes.
+
 ---
 
 ## Configuration

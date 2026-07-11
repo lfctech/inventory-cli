@@ -41,4 +41,39 @@ jobs:
         run: uv run pyright inventory/ tests/
 
       - name: Tests (pytest)
-        run: uv run pytest -q
+        run: uv run pytest -q -m "not integration"
+
+  e2e:
+    name: e2e (live Snipe-IT)
+    runs-on: ubuntu-latest
+    # Only spin up the Docker stack once the cheap lint/type/unit lane is green.
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Install deps
+        run: uv sync --all-groups --python 3.13
+
+      - name: Run live e2e tests
+        # Snipe-IT cold start (migrate + seed + passport) can be slow on CI
+        # runners, so allow a larger readiness budget than the local default.
+        env:
+          WAIT_TIMEOUT: "240"
+        run: make test-e2e
+
+      - name: Snipe-IT logs (on failure)
+        if: failure()
+        run: cd docker && docker compose logs --no-color
+
+      - name: Tear down stack
+        if: always()
+        run: make docker-down
