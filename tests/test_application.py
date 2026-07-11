@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
 from snipeit.exceptions import SnipeITNotFoundError, SnipeITValidationError
+from snipeit.resources.assets import Asset
 
 from inventory.application import InventoryService, NewModel
 
@@ -70,8 +72,9 @@ def test_create_asset_does_not_delete_preexisting_records_on_failure() -> None:
 
 def test_save_label_requires_asset_tag() -> None:
     client = Mock()
+    asset = cast(Asset, SimpleNamespace(asset_tag=None))
     with pytest.raises(ValueError, match="no asset tag"):
-        InventoryService(client).save_label(SimpleNamespace(asset_tag=None), "label.pdf")
+        InventoryService(client).save_label(asset, "label.pdf")
 
 
 def test_update_asset_rolls_back_new_model_when_save_fails(config_file) -> None:

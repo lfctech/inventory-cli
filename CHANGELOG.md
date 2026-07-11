@@ -5,6 +5,24 @@ inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project follows [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 bumps for breaking changes or significant new features, patch bumps for fixes).
 
+## Unreleased
+
+### New features
+
+- Added guided interactive mode through both `inventory interactive` and
+  `inventory -i`, covering asset lookup, creation, updates, and label saving.
+- Added one-prompt exact tag/serial lookup, searchable Snipe-IT resource
+  selection, missing model/manufacturer creation, explicit update clearing,
+  review screens, contextual follow-up actions, and safe label filenames.
+- Added best-effort reverse-order rollback for manufacturers and models created
+  by a failed multi-step interactive operation.
+
+### Code quality
+
+- Added a UI-neutral application service boundary shared by existing commands
+  and interactive workflows, with focused regression tests for lookup,
+  transactional creation, rollback, refresh failures, and both entry points.
+
 ## 0.3.2 — 2026-07-09
 
 ### Tests and CI

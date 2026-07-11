@@ -17,6 +17,9 @@ export INVENTORY_CONFIG="/path/to/your/config.toml"
 
 # Run any command
 uvx --from git+https://github.com/lfctech/inventory-cli inventory assets get --tag LFC-1042
+
+# Or launch guided interactive mode
+uvx --from git+https://github.com/lfctech/inventory-cli inventory -i
 ```
 
 ### Local development
@@ -93,6 +96,7 @@ inventory --url https://... --api-key token123 assets get --tag LFC-1042
 ```
 inventory
 ├── init                     Write a starter config.toml
+├── interactive              Launch guided inventory workflows (-i also works)
 ├── assets                   Manage Snipe-IT assets
 │   ├── get                  Fetch and display an asset
 │   ├── create               Create a new asset
@@ -111,6 +115,30 @@ inventory
     ├── update               Update one or more fields on an existing model
     └── delete               Delete a model
 ```
+
+### Interactive mode
+
+Launch the guided menu with either entry point:
+
+```bash
+inventory interactive
+inventory -i
+```
+
+Interactive mode covers four common workflows: find an asset, add an asset,
+update an asset, and save an asset label. Asset lookup uses one scan/input
+prompt and checks both exact asset tags and exact serial numbers. Model,
+manufacturer, category, fieldset, and status choices are searchable.
+
+Use `0` in numbered menus or enter `:back` at text prompts to go back. Press
+`Ctrl+C` to exit. Interactive mode requires a terminal and cannot be combined
+with `--json`; all other global connection and verbosity options work normally.
+
+When adding an asset, Snipe-IT auto-assigns the asset tag. Creating a missing
+model (and, if needed, its manufacturer) is supported. Categories and optional
+fieldsets must already exist. Multi-record creation is confirmed before any
+write, and records created by that operation are rolled back in reverse order
+if a later step fails.
 
 ### Lookup flags (available on all `assets` commands)
 

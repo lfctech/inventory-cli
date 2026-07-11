@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -90,3 +91,68 @@ def test_find_uses_one_prompt_for_tag_and_serial(
     assert result.exit_code == 0, result.output
     assert "Scan or enter asset tag/serial" in result.output
     assert "LFC-1" in result.output
+
+
+def test_add_asset_uses_auto_assigned_tag(
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
+) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=re.compile(rf"^{re.escape(TEST_URL)}/api/v1/models\b"),
+        json={"total": 1, "rows": [{"id": 5, "name": "Latitude 5440"}]},
+    )
+    httpx_mock.add_response(
+        method="GET",
+        url=re.compile(rf"^{re.escape(TEST_URL)}/api/v1/statuslabels\b"),
+        json={"total": 1, "rows": [{"id": 9, "name": "Ready"}]},
+    )
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{TEST_URL}/api/v1/hardware",
+        json={"status": "success", "payload": asset_payload(asset_id=42, asset_tag="LFC-42")},
+    )
+
+    result = runner.invoke(
+        app,
+        ["--config", str(config_file), "interactive"],
+        input="2\nLatitude\n1\nReady\n1\nSERIAL-42\ny\n0\n5\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Asset created: LFC-42" in result.output
+    post = next(request for request in httpx_mock.get_requests() if request.method == "POST")
+    assert json.loads(post.content) == {"model_id": 5, "status_id": 9, "serial": "SERIAL-42"}
+
+
+def test_update_shows_before_after_review_and_saves_name(
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
+) -> None:
+    original = asset_payload(asset_id=9, asset_tag="LFC-9", name="Old Name")
+    updated = asset_payload(asset_id=9, asset_tag="LFC-9", name="New Name")
+    httpx_mock.add_response(
+        method="GET", url=f"{TEST_URL}/api/v1/hardware/bytag/LFC-9", json=original
+    )
+    httpx_mock.add_response(
+        method="GET",
+        url=re.compile(rf"^{re.escape(TEST_URL)}/api/v1/hardware/byserial/LFC-9"),
+        status_code=404,
+        json={"status": "error", "messages": "not found"},
+    )
+    httpx_mock.add_response(
+        method="PATCH",
+        url=f"{TEST_URL}/api/v1/hardware/9",
+        json={"status": "success", "payload": updated},
+    )
+    httpx_mock.add_response(method="GET", url=f"{TEST_URL}/api/v1/hardware/9", json=updated)
+
+    result = runner.invoke(
+        app,
+        ["--config", str(config_file), "interactive"],
+        input="3\nLFC-9\n3\n1\nNew Name\n10\ny\n0\n5\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Current" in result.output
+    assert "Old Name" in result.output
+    assert "New Name" in result.output
+    assert "Asset LFC-9 updated" in result.output
