@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from snipeit import SnipeIT
-from snipeit.exceptions import SnipeITException, SnipeITNotFoundError
+from snipeit.exceptions import SnipeITApiError, SnipeITException, SnipeITNotFoundError
 from snipeit.resources.assets import Asset
 from snipeit.resources.models import Model
 
@@ -90,6 +90,13 @@ class InventoryService:
             serial_match = self.client.assets.get_by_serial(identifier)
         except SnipeITNotFoundError:
             serial_match = None
+        except SnipeITApiError as exc:
+            # A bare API error is how the client reports duplicate serials. A
+            # unique tag remains usable; typed auth/server/timeout errors keep
+            # propagating so they are never misreported as absence.
+            if tag_match is None or type(exc) is not SnipeITApiError:
+                raise
+            serial_match = None
         return AssetMatches(tag=tag_match, serial=serial_match)
 
     def search(self, resource: str, query: str | None = None, *, limit: int = 20) -> list[Any]:
@@ -171,16 +178,6 @@ class InventoryService:
             except SnipeITException as exc:
                 created.rollback_errors.append(f"Could not delete {resource[:-1]} {record_id}: {exc}")
 
-    def save_asset(self, asset: Asset) -> Asset:
-        asset.save()
-        try:
-            asset.refresh()
-        except SnipeITException:
-            # The write already succeeded. Keep the locally updated object rather
-            # than reporting failure or rolling back resources it may now use.
-            pass
-        return asset
-
     def update_asset(
         self,
         asset: Asset,
@@ -212,7 +209,8 @@ class InventoryService:
             }
             for key, label in labels.items():
                 if key in changes:
-                    asset.set_custom_field(label, changes[key])
+                    value = changes[key]
+                    asset.set_custom_field(label, "" if value == "" else str(value))
             asset.save()
         except Exception:
             self.rollback(created)

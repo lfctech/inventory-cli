@@ -151,6 +151,9 @@ def main(
 
     _configure_logging(verbose)
 
+    if interactive_mode and ctx.invoked_subcommand is not None:
+        raise typer.BadParameter("--interactive cannot be combined with a subcommand.")
+
     # Resolve and load config
     try:
         resolved = resolve_config_path(config_path)
@@ -163,6 +166,8 @@ def main(
             from .interactive import run_interactive
 
             run_interactive()
+        if ctx.invoked_subcommand is None:
+            typer.echo(ctx.get_help())
         return
     try:
         state.config = load_config(resolved)
@@ -177,6 +182,8 @@ def main(
         from .interactive import run_interactive
 
         run_interactive()
+    elif ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
 
 
 # ── Init command ──────────────────────────────────────────────────────────────

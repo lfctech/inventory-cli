@@ -67,6 +67,20 @@ def test_bare_inventory_still_shows_help(runner: CliRunner, fake_env, reset_stat
     assert "interactive" in result.output
 
 
+def test_global_option_without_command_shows_help(runner: CliRunner, fake_env, reset_state) -> None:
+    result = runner.invoke(app, ["--url", TEST_URL])
+
+    assert result.exit_code == 0
+    assert "Usage:" in result.output
+
+
+def test_interactive_flag_rejects_subcommand(runner: CliRunner, fake_env, reset_state) -> None:
+    result = runner.invoke(app, ["-i", "version"])
+
+    assert result.exit_code == 2
+    assert "--interactive cannot be combined with a subcommand" in result.output
+
+
 def test_find_uses_one_prompt_for_tag_and_serial(
     runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
 ) -> None:
@@ -156,3 +170,38 @@ def test_update_shows_before_after_review_and_saves_name(
     assert "Old Name" in result.output
     assert "New Name" in result.output
     assert "Asset LFC-9 updated" in result.output
+
+
+def test_invalid_number_reprompts_without_losing_staged_changes(
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
+) -> None:
+    original = asset_payload(asset_id=9, asset_tag="LFC-9", name="Old Name")
+    updated = asset_payload(asset_id=9, asset_tag="LFC-9", name="New Name")
+    httpx_mock.add_response(
+        method="GET", url=f"{TEST_URL}/api/v1/hardware/bytag/LFC-9", json=original
+    )
+    httpx_mock.add_response(
+        method="GET",
+        url=re.compile(rf"^{re.escape(TEST_URL)}/api/v1/hardware/byserial/LFC-9"),
+        status_code=404,
+        json={"status": "error", "messages": "not found"},
+    )
+    httpx_mock.add_response(
+        method="PATCH",
+        url=f"{TEST_URL}/api/v1/hardware/9",
+        json={"status": "success", "payload": updated},
+    )
+    httpx_mock.add_response(method="GET", url=f"{TEST_URL}/api/v1/hardware/9", json=updated)
+
+    result = runner.invoke(
+        app,
+        ["--config", str(config_file), "interactive"],
+        input="3\nLFC-9\n3\n1\nNew Name\n5\n1\n16gb\n16\n10\ny\n0\n5\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Enter a numeric value" in result.output
+    patch = next(request for request in httpx_mock.get_requests() if request.method == "PATCH")
+    body = json.loads(patch.content)
+    assert body["name"] == "New Name"
+    assert body["_snipeit_ram_gb_3"] == "16"

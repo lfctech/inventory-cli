@@ -246,14 +246,18 @@ class InteractiveSession:
             return BACK
         if action == 1:
             return ""
-        value = _prompt("New value")
-        if value is BACK:
-            return BACK
-        if key in {"ram", "storage", "passmark"}:
-            return int(str(value))
-        if key == "sale_price":
-            return float(str(value))
-        return str(value)
+        while True:
+            value = _prompt("New value")
+            if value is BACK:
+                return BACK
+            try:
+                if key in {"ram", "storage", "passmark"}:
+                    return int(str(value))
+                if key == "sale_price":
+                    return float(str(value))
+                return str(value)
+            except ValueError:
+                console.print("[yellow]Enter a numeric value, or :back to cancel this field.[/yellow]")
 
     def label_asset(self) -> None:
         asset = self.lookup()

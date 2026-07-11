@@ -7,7 +7,7 @@ from typing import cast
 from unittest.mock import Mock
 
 import pytest
-from snipeit.exceptions import SnipeITNotFoundError, SnipeITValidationError
+from snipeit.exceptions import SnipeITApiError, SnipeITNotFoundError, SnipeITValidationError
 from snipeit.resources.assets import Asset
 
 from inventory.application import InventoryService, NewModel
@@ -43,6 +43,15 @@ def test_find_asset_only_suppresses_not_found() -> None:
     client.assets.get_by_tag.side_effect = SnipeITValidationError("bad request")
     with pytest.raises(SnipeITValidationError):
         InventoryService(client).find_asset("SERIAL")
+
+
+def test_find_asset_keeps_valid_tag_when_serial_is_duplicated() -> None:
+    tag_asset = SimpleNamespace(id=8)
+    client = Mock()
+    client.assets.get_by_tag.return_value = tag_asset
+    client.assets.get_by_serial.side_effect = SnipeITApiError("Expected 1 asset, found 2")
+
+    assert InventoryService(client).find_asset("DUPLICATE").unique == [tag_asset]
 
 
 def test_create_asset_rolls_back_new_model_and_manufacturer_on_failure() -> None:
