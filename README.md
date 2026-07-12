@@ -131,8 +131,9 @@ prompt and checks both exact asset tags and exact serial numbers. Model,
 manufacturer, category, fieldset, and status choices are searchable.
 
 Use the arrow keys to move through menus and press Enter to select. Longer
-lists support type-to-filter fuzzy search. Choose `← Back` in menus or enter
-`:back` at text prompts to go back; press `Ctrl+C` to exit. Interactive mode
+lists support type-to-filter fuzzy search. Choose `← Back` in menus or press
+`Ctrl+C` to go back one screen while preserving unsaved input. On the main
+menu, `Ctrl+C` exits. Interactive mode
 clears the terminal between screens, requires a TTY, and cannot be combined
 with `--json`; all other global connection and verbosity options work normally.
 

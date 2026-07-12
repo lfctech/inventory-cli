@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
@@ -173,6 +174,161 @@ def test_enhanced_confirmation_delegates_to_inquirer(
     assert confirm.call_args.kwargs["default"] is True
 
 
+def test_ctrl_c_goes_back_from_text_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    from inventory import interactive
+
+    prompt = Mock()
+    prompt.execute.side_effect = KeyboardInterrupt
+    api = SimpleNamespace(text=Mock(return_value=prompt))
+    monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
+    monkeypatch.setattr(interactive, "_inquirer", api)
+    monkeypatch.setattr(interactive, "_redraw_page", Mock())
+
+    assert interactive._prompt("Serial") is interactive.BACK
+
+
+def test_ctrl_c_goes_back_from_submenu_but_exits_main_menu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inventory import interactive
+
+    prompt = Mock()
+    prompt.execute.side_effect = KeyboardInterrupt
+    api = SimpleNamespace(select=Mock(return_value=prompt), fuzzy=Mock())
+    monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
+    monkeypatch.setattr(interactive, "_inquirer", api)
+
+    assert interactive._choose("Submenu", ["Continue"], back=True) is None
+    with pytest.raises(KeyboardInterrupt):
+        interactive._choose("Main", ["Exit"], back=False)
+
+
+def test_ctrl_c_goes_back_from_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+    from inventory import interactive
+
+    prompt = Mock()
+    prompt.execute.side_effect = KeyboardInterrupt
+    api = SimpleNamespace(confirm=Mock(return_value=prompt))
+    monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
+    monkeypatch.setattr(interactive, "_inquirer", api)
+
+    assert interactive._confirm("Save?") is interactive.BACK
+
+
+def test_add_back_from_replacement_model_preserves_draft(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from inventory import interactive
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    service = Mock()
+    session = interactive.InteractiveSession(service)
+    model = SimpleNamespace(id=5, name="Latitude")
+    status = SimpleNamespace(id=9, name="Ready")
+    session.pick_model = Mock(side_effect=[model, interactive.BACK])
+    session.pick_resource = Mock(side_effect=[interactive.BACK, status])
+    monkeypatch.setattr(interactive, "_choose", Mock(side_effect=[1, 0]))
+    monkeypatch.setattr(interactive, "_prompt", Mock(return_value="SN-1"))
+    monkeypatch.setattr(interactive, "_confirm", Mock(return_value=False))
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_print_review", Mock())
+
+    session.add_asset()
+
+    assert session.pick_model.call_count == 2
+    service.create_asset.assert_not_called()
+
+
+def test_add_back_from_final_confirmation_revisits_serial_without_write(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from inventory import interactive
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    service = Mock()
+    session = interactive.InteractiveSession(service)
+    session.pick_model = Mock(return_value=SimpleNamespace(id=5, name="Latitude"))
+    session.pick_resource = Mock(return_value=SimpleNamespace(id=9, name="Ready"))
+    prompt = Mock(side_effect=["SN-1", "SN-1"])
+    monkeypatch.setattr(interactive, "_prompt", prompt)
+    monkeypatch.setattr(interactive, "_confirm", Mock(side_effect=[interactive.BACK, False]))
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_print_review", Mock())
+
+    session.add_asset()
+
+    assert prompt.call_count == 2
+    assert prompt.call_args_list[1].kwargs["default"] == "SN-1"
+    service.create_asset.assert_not_called()
+
+
+def test_ambiguous_lookup_back_returns_to_identifier_prompt(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from snipeit.resources.assets import Asset
+
+    from inventory import interactive
+    from inventory.application import AssetMatches
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    first = cast(Asset, SimpleNamespace(id=1, asset_tag="TAG-1", serial="S1", model={}))
+    second = cast(Asset, SimpleNamespace(id=2, asset_tag="TAG-2", serial="S2", model={}))
+    service = Mock()
+    service.find_asset.return_value = AssetMatches(tag=first, serial=second)
+    session = interactive.InteractiveSession(service)
+    prompt = Mock(side_effect=["MATCH", interactive.BACK])
+    monkeypatch.setattr(interactive, "_prompt", prompt)
+    monkeypatch.setattr(interactive, "_choose", Mock(return_value=None))
+    monkeypatch.setattr(interactive, "_page", Mock())
+
+    assert session.lookup() is None
+    assert prompt.call_count == 2
+
+
+def test_label_output_back_returns_to_selected_asset_confirmation(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from inventory import interactive
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    session = interactive.InteractiveSession(Mock())
+    asset = SimpleNamespace(id=1, asset_tag="LFC-1", serial="SN", model={"name": "Model"})
+    session.lookup = Mock(return_value=asset)
+    session.save_label = Mock(return_value=False)
+    monkeypatch.setattr(interactive, "_confirm", Mock(side_effect=[True, False]))
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_print_asset", Mock())
+
+    session.label_asset()
+
+    session.lookup.assert_called_once_with()
+    session.save_label.assert_called_once_with(asset)
+
+
+def test_clear_edit_draft_mutates_caller_owned_state() -> None:
+    from inventory import interactive
+
+    draft = interactive.AssetEditDraft(
+        changes={"name": "New"},
+        review_values={"name": "New"},
+        model=SimpleNamespace(id=5),
+    )
+
+    interactive._clear_edit_draft(draft)
+
+    assert draft.changes == {}
+    assert draft.review_values == {}
+    assert draft.model is None
+
+
 def test_find_uses_one_prompt_for_tag_and_serial(
     runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
 ) -> None:
@@ -191,7 +347,7 @@ def test_find_uses_one_prompt_for_tag_and_serial(
     result = runner.invoke(
         app,
         ["--config", str(config_file), "interactive"],
-        input="1\nSCAN-1\n0\n5\n",
+        input="1\nSCAN-1\n0\n:back\n5\n",
     )
 
     assert result.exit_code == 0, result.output
@@ -254,7 +410,7 @@ def test_update_shows_before_after_review_and_saves_name(
     result = runner.invoke(
         app,
         ["--config", str(config_file), "interactive"],
-        input="3\nLFC-9\n3\n1\nNew Name\n10\ny\n0\n5\n",
+        input="3\nLFC-9\n1\n3\n1\nNew Name\n10\ny\n0\n5\n",
     )
 
     assert result.exit_code == 0, result.output
@@ -288,7 +444,7 @@ def test_invalid_number_reprompts_without_losing_staged_changes(
     result = runner.invoke(
         app,
         ["--config", str(config_file), "interactive"],
-        input="3\nLFC-9\n3\n1\nNew Name\n5\n1\n16gb\n16\n10\ny\n0\n5\n",
+        input="3\nLFC-9\n1\n3\n1\nNew Name\n5\n1\n16gb\n16\n10\ny\n0\n5\n",
     )
 
     assert result.exit_code == 0, result.output

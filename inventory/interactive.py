@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass, field
+from enum import Enum, auto
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +32,36 @@ from .main import state
 BACK = object()
 _inquirer: Any = inquirer
 _current_page: tuple[str, str | None] | None = None
+
+
+@dataclass
+class AddAssetDraft:
+    model: Any = None
+    status: Any = None
+    serial: str | None = None
+
+
+@dataclass
+class AssetEditDraft:
+    changes: dict[str, Any] = field(default_factory=dict)
+    review_values: dict[str, str] = field(default_factory=dict)
+    model: Any = None
+
+
+class AddStep(Enum):
+    MODEL = auto()
+    STATUS = auto()
+    SERIAL = auto()
+    REVIEW = auto()
+
+
+class ModelStep(Enum):
+    NAME = auto()
+    MANUFACTURER = auto()
+    CATEGORY = auto()
+    FIELDSET = auto()
+    MODEL_NUMBER = auto()
+    NOTES = auto()
 
 
 def _streams_are_tty() -> bool:
@@ -68,15 +100,19 @@ def _redraw_page() -> None:
 def _prompt(text: str, *, default: str | None = None, allow_empty: bool = False) -> str | object:
     while True:
         if _enhanced_prompts():
-            value = _inquirer.text(
-                message=text,
-                default=default or "",
-                instruction="(:back to go back)",
-                mandatory=not allow_empty,
-                mandatory_message="Enter a value, or type :back.",
-                qmark=">",
-                amark="✓",
-            ).execute()
+            try:
+                value = _inquirer.text(
+                    message=text,
+                    default=default or "",
+                    instruction="(Ctrl+C back)",
+                    mandatory=not allow_empty,
+                    mandatory_message="Enter a value, or press Ctrl+C to go back.",
+                    qmark=">",
+                    amark="✓",
+                ).execute()
+            except KeyboardInterrupt:
+                _redraw_page()
+                return BACK
         else:
             value = typer.prompt(text, default=default, show_default=default is not None)
         value = str(value).strip()
@@ -88,7 +124,7 @@ def _prompt(text: str, *, default: str | None = None, allow_empty: bool = False)
             if _enhanced_prompts():
                 _redraw_page()
             return value
-        console.print("[yellow]A value is required. Enter :back to go back.[/yellow]")
+        console.print("[yellow]A value is required. Press Ctrl+C to go back.[/yellow]")
 
 
 def _choose(
@@ -121,7 +157,12 @@ def _choose(
         if use_fuzzy:
             kwargs["border"] = True
             kwargs["info"] = False
-        return prompt(**kwargs).execute()
+        try:
+            return prompt(**kwargs).execute()
+        except KeyboardInterrupt:
+            if not back:
+                raise
+            return None
 
     if not clear:
         console.print(f"\n[bold]{title}[/bold]")
@@ -142,17 +183,20 @@ def _choose(
         console.print("[yellow]Choose one of the listed numbers.[/yellow]")
 
 
-def _confirm(message: str, *, default: bool = False) -> bool:
+def _confirm(message: str, *, default: bool = False) -> bool | object:
     if _enhanced_prompts():
-        return bool(
-            _inquirer.confirm(
-                message=message,
-                default=default,
-                instruction="(Y/n)" if default else "(y/N)",
-                qmark=">",
-                amark="✓",
-            ).execute()
-        )
+        try:
+            return bool(
+                _inquirer.confirm(
+                    message=message,
+                    default=default,
+                    instruction=("(Y/n • Ctrl+C back)" if default else "(y/N • Ctrl+C back)"),
+                    qmark=">",
+                    amark="✓",
+                ).execute()
+            )
+        except KeyboardInterrupt:
+            return BACK
     return typer.confirm(message, default=default)
 
 
@@ -162,6 +206,16 @@ def _name(item: Any) -> str:
 
 def _nested_name(value: Any) -> str:
     return str(value.get("name", "") if isinstance(value, dict) else value or "")
+
+
+def _model_name(model: Any) -> str:
+    return model.name if isinstance(model, NewModel) else _name(model)
+
+
+def _clear_edit_draft(draft: AssetEditDraft) -> None:
+    draft.changes.clear()
+    draft.review_values.clear()
+    draft.model = None
 
 
 class InteractiveSession:
@@ -228,7 +282,7 @@ class InteractiveSession:
             console.print("[dim]Searching by asset tag and serial…[/dim]")
             matches = self.service.find_asset(str(identifier)).unique
             if not matches:
-                console.print("[yellow]No asset found. Try again or enter :back.[/yellow]")
+                console.print("[yellow]No asset found. Try again or press Ctrl+C.[/yellow]")
                 continue
             if len(matches) == 1:
                 return matches[0]
@@ -236,61 +290,128 @@ class InteractiveSession:
                 "Both an asset tag and serial matched. Choose the asset",
                 [_asset_label(asset) for asset in matches],
             )
-            return None if selected is None else matches[selected]
+            if selected is None:
+                _page("Find an asset", "Scan a barcode or enter an exact asset tag or serial number.")
+                continue
+            return matches[selected]
 
     def find_asset(self) -> None:
-        asset = self.lookup()
-        if asset is None:
-            return
         while True:
-            _page("Asset details", _asset_label(asset))
-            _print_asset(asset, self.config)
-            choice = _choose("What next?", ["Update this asset", "Save its label"], clear=False)
-            if choice is None:
+            asset = self.lookup()
+            if asset is None:
                 return
-            if choice == 0:
-                asset = self.edit_asset(asset)
-            else:
-                self.save_label(asset)
+            draft = AssetEditDraft()
+            while True:
+                _page("Asset details", _asset_label(asset))
+                _print_asset(asset, self.config)
+                choice = _choose("What next?", ["Update this asset", "Save its label"], clear=False)
+                if choice is None:
+                    break
+                if choice == 0:
+                    edited = self.edit_asset(asset, draft)
+                    if isinstance(edited, Asset):
+                        asset = edited
+                        draft = AssetEditDraft()
+                else:
+                    self.save_label(asset)
 
     def add_asset(self) -> None:
-        model = self.pick_model()
-        if model is BACK:
-            return
-        status = self.pick_resource("status_labels", "Search status labels", allow_create=False)
-        if status is BACK:
-            return
-        _page("Add an asset", "Snipe-IT will assign the asset tag automatically.")
-        serial_value = _prompt("Scan or enter serial number", allow_empty=True)
-        if serial_value is BACK:
-            return
-        serial = str(serial_value) or None
-        if serial is None and not _confirm("Serial is blank. Create the asset anyway?", default=False):
-            return
+        draft = AddAssetDraft()
+        step = AddStep.MODEL
+        while True:
+            if step is AddStep.MODEL:
+                had_model = draft.model is not None
+                if had_model:
+                    selected = _choose(
+                        "Choose model",
+                        [f"Continue with {_model_name(draft.model)}", "Choose a different model"],
+                    )
+                    if selected is None:
+                        return
+                    if selected == 0:
+                        step = AddStep.STATUS
+                        continue
+                model = self.pick_model()
+                if model is BACK:
+                    if had_model:
+                        continue
+                    return
+                draft.model = model
+                step = AddStep.STATUS
+                continue
 
-        rows = [
-            ("Model", model.name if isinstance(model, NewModel) else _name(model)),
-            ("Status", _name(status)),
-            ("Serial", serial or "(blank)"),
-            ("Asset tag", "Auto-assigned by Snipe-IT"),
-        ]
-        if isinstance(model, NewModel):
-            rows[1:1] = [
-                ("New manufacturer", model.manufacturer_display or "(existing)"),
-                ("Category", model.category_name or str(model.category_id)),
-                ("Fieldset", model.fieldset_name or "(none)"),
-                ("Model number", model.model_number or "(blank)"),
-                ("Model notes", model.notes or "(blank)"),
+            if step is AddStep.STATUS:
+                had_status = draft.status is not None
+                if had_status:
+                    selected = _choose(
+                        "Choose status",
+                        [f"Continue with {_name(draft.status)}", "Choose a different status"],
+                    )
+                    if selected is None:
+                        step = AddStep.MODEL
+                        continue
+                    if selected == 0:
+                        step = AddStep.SERIAL
+                        continue
+                status = self.pick_resource("status_labels", "Search status labels", allow_create=False)
+                if status is BACK:
+                    if not had_status:
+                        step = AddStep.MODEL
+                    continue
+                draft.status = status
+                step = AddStep.SERIAL
+                continue
+
+            if step is AddStep.SERIAL:
+                _page("Add an asset", "Snipe-IT will assign the asset tag automatically.")
+                serial_value = _prompt(
+                    "Scan or enter serial number",
+                    default=draft.serial,
+                    allow_empty=True,
+                )
+                if serial_value is BACK:
+                    step = AddStep.STATUS
+                    continue
+                draft.serial = str(serial_value) or None
+                if draft.serial is None:
+                    blank = _confirm("Serial is blank. Create the asset anyway?", default=False)
+                    if blank is BACK:
+                        continue
+                    if not blank:
+                        continue
+                step = AddStep.REVIEW
+                continue
+
+            rows = [
+                ("Model", _model_name(draft.model)),
+                ("Status", _name(draft.status)),
+                ("Serial", draft.serial or "(blank)"),
+                ("Asset tag", "Auto-assigned by Snipe-IT"),
             ]
-        _page("Review new asset", "Nothing has been written yet.")
-        _print_review("Create Asset", rows)
-        if not _confirm("Create this asset?", default=False):
-            return
-        kwargs: dict[str, Any] = {"status_id": int(status.id), "serial": serial}
-        if isinstance(model, NewModel):
-            kwargs["new_model"] = model
+            if isinstance(draft.model, NewModel):
+                rows[1:1] = [
+                    ("New manufacturer", draft.model.manufacturer_display or "(existing)"),
+                    ("Category", draft.model.category_name or str(draft.model.category_id)),
+                    ("Fieldset", draft.model.fieldset_name or "(none)"),
+                    ("Model number", draft.model.model_number or "(blank)"),
+                    ("Model notes", draft.model.notes or "(blank)"),
+                ]
+            _page("Review new asset", "Nothing has been written yet.")
+            _print_review("Create Asset", rows)
+            confirmed = _confirm("Create this asset?", default=False)
+            if confirmed is BACK:
+                step = AddStep.SERIAL
+                continue
+            if not confirmed:
+                return
+            break
+
+        assert draft.status is not None and draft.model is not None
+        kwargs: dict[str, Any] = {"status_id": int(draft.status.id), "serial": draft.serial}
+        if isinstance(draft.model, NewModel):
+            kwargs["new_model"] = draft.model
         else:
-            kwargs["model_id"] = int(model.id)
+            kwargs["model_id"] = int(draft.model.id)
         asset, created = self.service.create_asset(**kwargs)
         for error in created.rollback_errors:
             console.print(f"[yellow]{error}[/yellow]")
@@ -310,62 +431,70 @@ class InteractiveSession:
                 _print_asset(asset, self.config)
 
     def update_asset(self) -> None:
-        asset = self.lookup()
-        if asset is not None:
-            _page("Update asset", _asset_label(asset))
-            _print_asset(asset, self.config)
-            self.edit_asset(asset)
-
-    def edit_asset(self, asset: Asset) -> Asset:
         while True:
-            changes: dict[str, Any] = {}
-            review_values: dict[str, str] = {}
-            model: Any = None
+            asset = self.lookup()
+            if asset is None:
+                return
+            draft = AssetEditDraft()
+            while True:
+                _page("Update asset", _asset_label(asset))
+                _print_asset(asset, self.config)
+                choice = _choose("What next?", ["Edit this asset"], clear=False)
+                if choice is None:
+                    break
+                edited = self.edit_asset(asset, draft)
+                if edited is not BACK:
+                    return
+
+    def edit_asset(self, asset: Asset, draft: AssetEditDraft | None = None) -> Asset | object:
+        draft = draft or AssetEditDraft()
+        while True:
             while True:
                 options = [
                     "Model", "Status", "Name", "CPU", "RAM", "Storage",
                     "Touch screen", "PassMark", "Sale price", "Review changes",
                 ]
-                staged = len(review_values)
+                staged = len(draft.review_values)
                 choice = _choose(
                     "Update asset",
                     options,
                     subtitle=f"{_asset_label(asset)}  •  {staged} staged change{'s' if staged != 1 else ''}",
                 )
                 if choice is None:
-                    return asset
+                    return BACK
                 if choice == 9:
                     break
                 key = ("model", "status_id", "name", "cpu", "ram", "storage", "touch_screen", "passmark", "sale_price")[choice]
                 if key == "model":
                     picked = self.pick_model()
                     if picked is not BACK:
-                        model = picked
-                        review_values[key] = picked.name if isinstance(picked, NewModel) else _name(picked)
+                        draft.model = picked
+                        draft.review_values[key] = _model_name(picked)
                     continue
                 if key == "status_id":
                     picked = self.pick_resource("status_labels", "Search status labels", allow_create=False)
                     if picked is not BACK:
-                        changes[key] = int(picked.id)
-                        review_values[key] = _name(picked)
+                        draft.changes[key] = int(picked.id)
+                        draft.review_values[key] = _name(picked)
                     continue
                 value = self._edit_value(key)
                 if value is not BACK:
-                    changes[key] = value
-                    review_values[key] = str(value) if value != "" else "(clear)"
+                    draft.changes[key] = value
+                    draft.review_values[key] = str(value) if value != "" else "(clear)"
 
-            if not changes and model is None:
+            if not draft.changes and draft.model is None:
                 console.print("[yellow]No changes selected.[/yellow]")
                 continue
             _page("Review changes", "Nothing has been written yet.")
-            _print_update_review(asset, self.config, review_values)
-            if not _confirm("Save these changes?", default=False):
+            _print_update_review(asset, self.config, draft.review_values)
+            confirmed = _confirm("Save these changes?", default=False)
+            if confirmed is BACK or not confirmed:
                 continue
-            kwargs: dict[str, Any] = {"changes": changes}
-            if isinstance(model, NewModel):
-                kwargs["new_model"] = model
-            elif model is not None:
-                kwargs["model_id"] = int(model.id)
+            kwargs: dict[str, Any] = {"changes": draft.changes}
+            if isinstance(draft.model, NewModel):
+                kwargs["new_model"] = draft.model
+            elif draft.model is not None:
+                kwargs["model_id"] = int(draft.model.id)
             asset, created = self.service.update_asset(asset, self.config, **kwargs)
             for error in created.rollback_errors:
                 console.print(f"[yellow]{error}[/yellow]")
@@ -378,137 +507,245 @@ class InteractiveSession:
             if action == 0:
                 self.save_label(asset)
                 return asset
+            _clear_edit_draft(draft)
 
     def _edit_value(self, key: str) -> str | int | float | object:
         if key == "touch_screen":
             choice = _choose("Touch screen", ["Yes", "No", "Clear value"])
             return BACK if choice is None else ("1", "0", "")[choice]
-        action = _choose(key.replace("_", " ").title(), ["Enter new value", "Clear value"])
-        if action is None:
-            return BACK
-        if action == 1:
-            return ""
         while True:
-            value = _prompt("New value")
-            if value is BACK:
+            action = _choose(key.replace("_", " ").title(), ["Enter new value", "Clear value"])
+            if action is None:
                 return BACK
-            try:
-                if key in {"ram", "storage", "passmark"}:
-                    return int(str(value))
-                if key == "sale_price":
-                    return float(str(value))
-                return str(value)
-            except ValueError:
-                console.print("[yellow]Enter a numeric value, or :back to cancel this field.[/yellow]")
+            if action == 1:
+                return ""
+            while True:
+                value = _prompt("New value")
+                if value is BACK:
+                    break
+                try:
+                    if key in {"ram", "storage", "passmark"}:
+                        return int(str(value))
+                    if key == "sale_price":
+                        return float(str(value))
+                    return str(value)
+                except ValueError:
+                    console.print("[yellow]Enter a numeric value, or press Ctrl+C to go back.[/yellow]")
 
     def label_asset(self) -> None:
-        asset = self.lookup()
-        if asset is not None:
-            _page("Save asset label", _asset_label(asset))
-            _print_asset(asset, self.config)
-            if _confirm("Save a label for this asset?", default=True):
-                self.save_label(asset)
+        while True:
+            asset = self.lookup()
+            if asset is None:
+                return
+            while True:
+                _page("Save asset label", _asset_label(asset))
+                _print_asset(asset, self.config)
+                confirmed = _confirm("Save a label for this asset?", default=True)
+                if confirmed is BACK:
+                    break
+                if not confirmed:
+                    return
+                if self.save_label(asset):
+                    return
 
-    def save_label(self, asset: Asset) -> None:
+    def save_label(self, asset: Asset) -> bool:
         default = f"./label-{asset.asset_tag}.pdf"
         _page("Save asset label", _asset_label(asset))
         while True:
             output = _prompt("Output path", default=default)
             if output is BACK:
-                return
+                return False
             path = Path(str(output)).expanduser()
-            if not path.exists() or _confirm(f"{path} exists. Overwrite it?", default=False):
+            if not path.exists():
                 break
-            console.print("[dim]Enter another output path, or :back to cancel.[/dim]")
+            overwrite = _confirm(f"{path} exists. Overwrite it?", default=False)
+            if overwrite is BACK:
+                continue
+            if overwrite:
+                break
+            console.print("[dim]Enter another output path, or press Ctrl+C to go back.[/dim]")
         saved = self.service.save_label(asset, path)
         _page("Label saved")
         console.print(f"[green]✓[/green] Label saved to: [bold]{saved}[/bold]")
+        return True
 
     def pick_model(self) -> Any:
         return self.pick_resource("models", "Search models", allow_create=True)
 
     def pick_resource(self, resource: str, prompt: str, *, allow_create: bool) -> Any:
-        _page(prompt, "Type a search term. Enter :back to return.")
-        query = _prompt(prompt)
-        if query is BACK:
-            return BACK
-        console.print("[dim]Searching Snipe-IT…[/dim]")
-        results = self.service.search(resource, str(query))
-        labels = [_resource_label(item) for item in results]
-        if allow_create:
-            labels.append("Create a new model")
-        if not labels:
-            console.print("[yellow]No matches found.[/yellow]")
-            return BACK
-        selected = _choose(
-            "Matches",
-            labels,
-            subtitle="Type to filter • ↑/↓ move • Enter select",
-            fuzzy=True,
-        )
-        if selected is None:
-            return BACK
-        if allow_create and selected == len(results):
-            return self.new_model(str(query))
-        return results[selected]
+        query_text: str | None = None
+        while True:
+            _page(prompt, "Type a search term. Press Ctrl+C to return.")
+            query = _prompt(prompt, default=query_text)
+            if query is BACK:
+                return BACK
+            query_text = str(query)
+            console.print("[dim]Searching Snipe-IT…[/dim]")
+            results = self.service.search(resource, query_text)
+            labels = [_resource_label(item) for item in results]
+            if allow_create:
+                labels.append("Create a new model")
+            if not labels:
+                console.print("[yellow]No matches found. Press Ctrl+C to return.[/yellow]")
+                continue
+            selected = _choose(
+                "Matches",
+                labels,
+                subtitle="Type to filter • ↑/↓ move • Enter select",
+                fuzzy=True,
+            )
+            if selected is None:
+                continue
+            if allow_create and selected == len(results):
+                created = self.new_model(query_text)
+                if created is BACK:
+                    continue
+                return created
+            return results[selected]
 
     def new_model(self, suggested_name: str) -> NewModel | object:
-        _page("Create a new model", "The model will be created only after the final asset review.")
-        name = _prompt("Model name", default=suggested_name)
-        if name is BACK:
-            return BACK
-        manufacturer = self.pick_manufacturer()
+        name: str | None = suggested_name
+        manufacturer: Any = None
         manufacturer_id: int | None = None
         manufacturer_name: str | None = None
-        if manufacturer is BACK:
-            return BACK
-        if isinstance(manufacturer, str):
-            manufacturer_name = manufacturer
-        else:
-            manufacturer_id = int(manufacturer.id)
-        category = self.pick_resource("categories", "Search categories", allow_create=False)
-        if category is BACK:
-            return BACK
+        category: Any = None
         fieldset_id: int | None = None
         fieldset: Any = None
-        if _confirm("Select a fieldset?", default=False):
-            fieldset = self.pick_resource("fieldsets", "Search fieldsets", allow_create=False)
-            if fieldset is not BACK:
-                fieldset_id = int(fieldset.id)
-        _page("Create a new model", "Optional model details. Enter :back to cancel.")
-        model_number = _prompt("Model number", allow_empty=True)
-        if model_number is BACK:
-            return BACK
-        notes = _prompt("Notes", allow_empty=True)
-        if notes is BACK:
-            return BACK
+        model_number: str | None = None
+        notes: str | None = None
+        step = ModelStep.NAME
+
+        while True:
+            if step is ModelStep.NAME:
+                _page("Create a new model", "The model will be created only after final review.")
+                value = _prompt("Model name", default=name)
+                if value is BACK:
+                    return BACK
+                name = str(value)
+                step = ModelStep.MANUFACTURER
+                continue
+            if step is ModelStep.MANUFACTURER:
+                manufacturer = self.pick_manufacturer(manufacturer)
+                if manufacturer is BACK:
+                    step = ModelStep.NAME
+                    continue
+                manufacturer_id = None
+                manufacturer_name = None
+                if isinstance(manufacturer, str):
+                    manufacturer_name = manufacturer
+                else:
+                    manufacturer_id = int(manufacturer.id)
+                step = ModelStep.CATEGORY
+                continue
+            if step is ModelStep.CATEGORY:
+                if category is not None:
+                    selected = _choose(
+                        "Choose category",
+                        [f"Continue with {_name(category)}", "Choose a different category"],
+                    )
+                    if selected is None:
+                        step = ModelStep.MANUFACTURER
+                        continue
+                    if selected == 0:
+                        step = ModelStep.FIELDSET
+                        continue
+                selected_category = self.pick_resource(
+                    "categories", "Search categories", allow_create=False
+                )
+                if selected_category is BACK:
+                    if category is None:
+                        step = ModelStep.MANUFACTURER
+                    continue
+                category = selected_category
+                step = ModelStep.FIELDSET
+                continue
+            if step is ModelStep.FIELDSET:
+                _page("Create a new model", "Choose an optional fieldset.")
+                if fieldset is not None:
+                    selected = _choose(
+                        "Choose fieldset",
+                        [f"Continue with {_name(fieldset)}", "Choose a different fieldset", "No fieldset"],
+                    )
+                    if selected is None:
+                        step = ModelStep.CATEGORY
+                        continue
+                    if selected == 0:
+                        step = ModelStep.MODEL_NUMBER
+                        continue
+                    if selected == 2:
+                        fieldset = None
+                        fieldset_id = None
+                        step = ModelStep.MODEL_NUMBER
+                        continue
+                    select_fieldset: bool | object = True
+                else:
+                    select_fieldset = _confirm("Select a fieldset?", default=False)
+                if select_fieldset is BACK:
+                    step = ModelStep.CATEGORY
+                    continue
+                if select_fieldset:
+                    selected_fieldset = self.pick_resource(
+                        "fieldsets", "Search fieldsets", allow_create=False
+                    )
+                    if selected_fieldset is BACK:
+                        continue
+                    fieldset = selected_fieldset
+                    fieldset_id = int(fieldset.id)
+                else:
+                    fieldset = None
+                    fieldset_id = None
+                step = ModelStep.MODEL_NUMBER
+                continue
+            if step is ModelStep.MODEL_NUMBER:
+                _page("Create a new model", "Optional model details.")
+                value = _prompt("Model number", default=model_number, allow_empty=True)
+                if value is BACK:
+                    step = ModelStep.FIELDSET
+                    continue
+                model_number = str(value) or None
+                step = ModelStep.NOTES
+                continue
+            _page("Create a new model", "Optional model details.")
+            value = _prompt("Notes", default=notes, allow_empty=True)
+            if value is BACK:
+                step = ModelStep.MODEL_NUMBER
+                continue
+            notes = str(value) or None
+            break
+
+        assert name is not None and category is not None
         return NewModel(
             name=str(name), category_id=int(category.id), manufacturer_id=manufacturer_id,
             manufacturer_name=manufacturer_name, fieldset_id=fieldset_id,
-            model_number=str(model_number) or None, notes=str(notes) or None,
+            model_number=model_number, notes=notes,
             category_name=_name(category),
             manufacturer_display=manufacturer_name or _name(manufacturer),
             fieldset_name=_name(fieldset) if fieldset_id is not None else None,
         )
 
-    def pick_manufacturer(self) -> Any:
-        _page("Choose manufacturer", "Search existing manufacturers or create a new one.")
-        query = _prompt("Search manufacturers")
-        if query is BACK:
-            return BACK
-        results = self.service.search("manufacturers", str(query))
-        selected = _choose(
-            "Matches",
-            [_resource_label(item) for item in results] + ["Create a new manufacturer"],
-            subtitle="Type to filter • ↑/↓ move • Enter select",
-            fuzzy=True,
-        )
-        if selected is None:
-            return BACK
-        if selected == len(results):
-            value = _prompt("Manufacturer name", default=str(query))
-            return BACK if value is BACK else str(value)
-        return results[selected]
+    def pick_manufacturer(self, current: Any = None) -> Any:
+        query_text = current if isinstance(current, str) else _name(current) if current is not None else None
+        while True:
+            _page("Choose manufacturer", "Search existing manufacturers or create a new one.")
+            query = _prompt("Search manufacturers", default=query_text)
+            if query is BACK:
+                return BACK
+            query_text = str(query)
+            results = self.service.search("manufacturers", query_text)
+            selected = _choose(
+                "Matches",
+                [_resource_label(item) for item in results] + ["Create a new manufacturer"],
+                subtitle="Type to filter • ↑/↓ move • Enter select",
+                fuzzy=True,
+            )
+            if selected is None:
+                continue
+            if selected == len(results):
+                value = _prompt("Manufacturer name", default=query_text)
+                if value is BACK:
+                    continue
+                return str(value)
+            return results[selected]
 
 
 def run_interactive() -> None:
@@ -521,7 +758,8 @@ def run_interactive() -> None:
     if state.config is None:
         target = _xdg_config_path()
         console.print("[yellow]No config.toml was found.[/yellow]")
-        if _confirm(f"Create a starter config at {target}?", default=True):
+        create_config = _confirm(f"Create a starter config at {target}?", default=True)
+        if create_config is True:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(DEFAULT_CONFIG_TEMPLATE)
             console.print(f"[green]✓[/green] Config written to: {target}")
