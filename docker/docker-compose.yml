@@ -3,7 +3,7 @@
 
 services:
   app:
-    image: ${SNIPEIT_IMAGE:-snipe/snipe-it:v8.6.1-alpine}
+    image: ${SNIPEIT_IMAGE:-snipe/snipe-it:v8.7.2-alpine}
     restart: unless-stopped
     ports:
       - "${APP_PORT:-8010}:80"
@@ -20,7 +20,7 @@ services:
     
 
   seeder:
-    image: ${SNIPEIT_IMAGE:-snipe/snipe-it:v8.6.1-alpine}
+    image: ${SNIPEIT_IMAGE:-snipe/snipe-it:v8.7.2-alpine}
     depends_on:
       db:
         condition: service_healthy
