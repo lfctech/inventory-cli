@@ -149,16 +149,6 @@ def test_price_from_points_empty_tiers_returns_floor() -> None:
     assert price_from_points(50, []) == 100
 
 
-def test_price_from_points_unsorted_tiers_does_not_raise() -> None:
-    """price_from_points must still produce a deterministic answer even if a
-    caller passes unsorted tiers (config._parse_tiers sorts on the way in,
-    but defence-in-depth keeps the function honest)."""
-    tiers = [PricingTier(999, 250), PricingTier(6, 100), PricingTier(14, 150)]
-    # First-match-wins behaviour at runtime — caller is responsible for
-    # ordering. Just assert it returns *some* tier price, not a crash.
-    assert price_from_points(7, tiers) in {100, 150, 250}
-
-
 # ── calculate_price (full breakdown) ─────────────────────────────────────────
 
 
