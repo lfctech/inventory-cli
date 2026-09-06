@@ -91,6 +91,7 @@ def test_lookup_csv_high_confidence_intel_match() -> None:
     (>= 70%, comfortably above noise) and pick the right family."""
     result = lookup_csv("Intel Core i5-10400")
     assert result is not None
+    assert set(result.keys()) == {"score", "matched_cpu", "confidence"}
     assert "i5-10400" in result["matched_cpu"]
     assert result["confidence"] >= 70
     assert result["score"] > 0
@@ -121,11 +122,3 @@ def test_lookup_csv_unknown_model_falls_back_to_full_search() -> None:
     assert 0 <= result["confidence"] <= 100
     # Confidence will be low — that's the operator-prompt branch's job.
     assert result["confidence"] < 80
-
-
-def test_lookup_csv_returns_typed_dict_keys() -> None:
-    """Spot-check the contract — the calling code reads these three keys."""
-    result = lookup_csv("Intel Core i5-10400")
-    assert result is not None
-    assert set(result.keys()) == {"score", "matched_cpu", "confidence"}
-
