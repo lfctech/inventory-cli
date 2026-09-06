@@ -131,9 +131,9 @@ prompt and checks both exact asset tags and exact serial numbers. Model,
 manufacturer, category, fieldset, and status choices are searchable.
 
 Use the arrow keys to move through menus and press Enter to select. Longer
-lists support type-to-filter fuzzy search. Choose `← Back` in menus or press
-`Ctrl+C` to go back one screen while preserving unsaved input. On the main
-menu, `Ctrl+C` exits. Interactive mode
+lists support type-to-filter fuzzy search. Press `Esc` to go back while
+preserving draft input; at the post-add saved-asset menu, `Esc` returns to the
+main menu. `Ctrl+C` exits interactive mode. Interactive mode
 clears the terminal between screens, requires a TTY, and cannot be combined
 with `--json`; all other global connection and verbosity options work normally.
 
@@ -141,7 +141,12 @@ When adding an asset, Snipe-IT auto-assigns the asset tag. Creating a missing
 model (and, if needed, its manufacturer) is supported. Categories and optional
 fieldsets must already exist. Multi-record creation is confirmed before any
 write, and records created by that operation are rolled back in reverse order
-if a later step fails.
+if a later step fails, on a best-effort basis. Interrupted or ambiguous writes
+still require operator verification; rollback is not guaranteed in every case.
+
+If label generation or local label output fails after an asset is added, the
+saved asset is retained. The follow-up menu retries only label saving, without
+creating the asset again.
 
 ### Lookup flags (available on all `assets` commands)
 

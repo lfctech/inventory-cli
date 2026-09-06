@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -50,9 +50,7 @@ def test_interactive_short_flag_can_exit(
     assert "Inventory" in result.output
 
 
-def test_interactive_rejects_json(
-    runner: CliRunner, fake_env, reset_state, config_file
-) -> None:
+def test_interactive_rejects_json(runner: CliRunner, fake_env, reset_state, config_file) -> None:
     result = runner.invoke(
         app,
         ["--config", str(config_file), "--json", "interactive"],
@@ -84,7 +82,7 @@ def test_interactive_flag_rejects_subcommand(runner: CliRunner, fake_env, reset_
     assert "--interactive cannot be combined with a subcommand" in result.output
 
 
-def test_enhanced_menu_uses_keyboard_select_and_back_choice(
+def test_enhanced_menu_uses_keyboard_select_without_back_choice(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from inventory import interactive
@@ -99,8 +97,13 @@ def test_enhanced_menu_uses_keyboard_select_and_back_choice(
     assert interactive._choose("Menu", ["First", "Second"]) == 1
 
     choices = select.call_args.kwargs["choices"]
-    assert [choice.name for choice in choices] == ["First", "Second", "← Back"]
-    assert "↑/↓" in select.call_args.kwargs["instruction"]
+    assert [choice.name for choice in choices] == ["First", "Second"]
+    assert select.call_args.kwargs["instruction"] == ""
+    assert interactive._current_page is not None
+    controls = interactive._current_page[2]
+    assert controls is not None
+    assert "Esc back" in controls
+    prompt.register_kb.assert_called_once()
 
 
 def test_enhanced_menu_uses_fuzzy_filter_when_requested(
@@ -117,6 +120,10 @@ def test_enhanced_menu_uses_fuzzy_filter_when_requested(
 
     assert interactive._choose("Fields", ["One", "Two"], fuzzy=True) == 0
     fuzzy.assert_called_once()
+    prompt.register_kb.assert_called_once()
+    assert interactive._current_page is not None
+    assert interactive._current_page[1] is None
+    assert interactive._current_page[2] == interactive._FUZZY_HELP
 
 
 def test_page_clears_and_redraws_in_enhanced_mode(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,19 +138,102 @@ def test_page_clears_and_redraws_in_enhanced_mode(monkeypatch: pytest.MonkeyPatc
     clear.assert_called_once_with()
 
 
-def test_enhanced_menu_back_choice_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_page_renders_title_then_one_contextual_help_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inventory import interactive
+
+    printed = Mock()
+    monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: False)
+    monkeypatch.setattr(interactive.console, "print", printed)
+
+    interactive._page("Search fieldsets", "Type a search term", controls=interactive._TEXT_HELP)
+
+    lines = [call.args[0] for call in printed.call_args_list if call.args]
+    assert lines[:3] == [
+        "[bold]Search fieldsets[/bold]",
+        "[dim]Enter submit • Esc back[/dim]",
+        "[dim]Type a search term[/dim]",
+    ]
+    assert len([line for line in lines if "Esc back" in line]) == 1
+
+
+def test_escape_timeout_is_tuned_for_each_prompt() -> None:
+    from inventory import interactive
+
+    application = SimpleNamespace(ttimeoutlen=0.5, timeoutlen=1.0)
+    interactive._tune_escape_timeout(SimpleNamespace(application=application))
+
+    assert application.ttimeoutlen == interactive._ESCAPE_TIMEOUT_SECONDS
+    assert application.timeoutlen == interactive._ESCAPE_TIMEOUT_SECONDS
+
+
+def test_resource_search_back_cancels_without_searching(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from inventory import interactive
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    service = Mock()
+    session = interactive.InteractiveSession(service)
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_prompt", Mock(return_value=interactive.BACK))
+
+    assert session.pick_resource("models", "Search models", allow_create=True) is interactive.BACK
+    service.search.assert_not_called()
+
+
+def test_escape_binding_returns_back_without_changing_ctrl_c_behavior() -> None:
+    from prompt_toolkit.keys import Keys
+
+    from inventory import interactive
+
+    class Prompt:
+        handler: Any
+
+        def __init__(self):
+            self.status = {"answered": False, "result": None}
+
+        def register_kb(self, key):
+            assert key == Keys.Escape
+
+            def decorator(handler):
+                self.handler = handler
+                return handler
+
+            return decorator
+
+    class App:
+        result: Any
+
+        def exit(self, *, result):
+            self.result = result
+
+    prompt = Prompt()
+    interactive._install_back_binding(prompt)
+    app = App()
+    prompt.handler(SimpleNamespace(app=app))
+
+    assert prompt.status["result"] is interactive.BACK
+    assert app.result is interactive.BACK
+
+
+def test_enhanced_menu_escape_returns_back(monkeypatch: pytest.MonkeyPatch) -> None:
     from inventory import interactive
 
     prompt = Mock()
-    prompt.execute.return_value = None
+    prompt.execute.return_value = interactive.BACK
     api = SimpleNamespace(select=Mock(return_value=prompt), fuzzy=Mock())
     monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
     monkeypatch.setattr(interactive, "_inquirer", api)
 
-    assert interactive._choose("Menu", ["Continue"]) is None
+    assert interactive._choose("Menu", ["Continue"]) is interactive.BACK
+    prompt.register_kb.assert_called_once()
 
 
-def test_enhanced_text_back_redraws_current_page(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_enhanced_text_colon_back_remains_compatible(monkeypatch: pytest.MonkeyPatch) -> None:
     from inventory import interactive
 
     prompt = Mock()
@@ -155,7 +245,37 @@ def test_enhanced_text_back_redraws_current_page(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(interactive, "_redraw_page", redraw)
 
     assert interactive._prompt("Serial") is interactive.BACK
-    redraw.assert_called_once_with()
+    redraw.assert_not_called()
+
+
+def test_enhanced_text_escape_result_is_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    from inventory import interactive
+
+    prompt = Mock()
+    prompt.execute.return_value = interactive.BACK
+    api = SimpleNamespace(text=Mock(return_value=prompt))
+    monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
+    monkeypatch.setattr(interactive, "_inquirer", api)
+
+    assert interactive._prompt("Serial") is interactive.BACK
+    prompt.register_kb.assert_called_once()
+
+
+def test_enhanced_text_prompt_has_no_embedded_control_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inventory import interactive
+
+    prompt = Mock()
+    prompt.execute.return_value = "serial"
+    text = Mock(return_value=prompt)
+    api = SimpleNamespace(text=text)
+    monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
+    monkeypatch.setattr(interactive, "_inquirer", api)
+
+    assert interactive._prompt("Serial") == "serial"
+    assert text.call_args.kwargs["instruction"] == ""
+    assert "Ctrl+C" not in text.call_args.kwargs["mandatory_message"]
 
 
 def test_enhanced_confirmation_delegates_to_inquirer(
@@ -172,9 +292,24 @@ def test_enhanced_confirmation_delegates_to_inquirer(
 
     assert interactive._confirm("Continue?", default=True) is True
     assert confirm.call_args.kwargs["default"] is True
+    assert "Ctrl+C" not in confirm.call_args.kwargs["instruction"]
+    prompt.register_kb.assert_called_once()
 
 
-def test_ctrl_c_goes_back_from_text_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fallback_menu_hides_selectable_back_choice(monkeypatch: pytest.MonkeyPatch) -> None:
+    from inventory import interactive
+
+    output = Mock()
+    monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: False)
+    monkeypatch.setattr(interactive.console, "print", output)
+    monkeypatch.setattr(interactive.typer, "prompt", Mock(return_value=":back"))
+
+    assert interactive._choose("Menu", ["Continue"]) is interactive.BACK
+    rendered = " ".join(str(call.args[0]) for call in output.call_args_list if call.args)
+    assert "Back" not in rendered
+
+
+def test_ctrl_c_propagates_from_text_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     from inventory import interactive
 
     prompt = Mock()
@@ -182,12 +317,11 @@ def test_ctrl_c_goes_back_from_text_prompt(monkeypatch: pytest.MonkeyPatch) -> N
     api = SimpleNamespace(text=Mock(return_value=prompt))
     monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
     monkeypatch.setattr(interactive, "_inquirer", api)
-    monkeypatch.setattr(interactive, "_redraw_page", Mock())
+    with pytest.raises(KeyboardInterrupt):
+        interactive._prompt("Serial")
 
-    assert interactive._prompt("Serial") is interactive.BACK
 
-
-def test_ctrl_c_goes_back_from_submenu_but_exits_main_menu(
+def test_ctrl_c_propagates_from_submenu_and_main_menu(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from inventory import interactive
@@ -198,12 +332,13 @@ def test_ctrl_c_goes_back_from_submenu_but_exits_main_menu(
     monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
     monkeypatch.setattr(interactive, "_inquirer", api)
 
-    assert interactive._choose("Submenu", ["Continue"], back=True) is None
+    with pytest.raises(KeyboardInterrupt):
+        interactive._choose("Submenu", ["Continue"], back=True)
     with pytest.raises(KeyboardInterrupt):
         interactive._choose("Main", ["Exit"], back=False)
 
 
-def test_ctrl_c_goes_back_from_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ctrl_c_propagates_from_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
     from inventory import interactive
 
     prompt = Mock()
@@ -212,7 +347,34 @@ def test_ctrl_c_goes_back_from_confirmation(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(interactive, "_enhanced_prompts", lambda: True)
     monkeypatch.setattr(interactive, "_inquirer", api)
 
-    assert interactive._confirm("Save?") is interactive.BACK
+    with pytest.raises(KeyboardInterrupt):
+        interactive._confirm("Save?")
+
+
+def test_update_asset_uses_yes_no_confirmation_before_editing(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from inventory import interactive
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    session = interactive.InteractiveSession(Mock())
+    asset = cast(Any, SimpleNamespace(asset_tag="LFC-1", serial="SN", model={}))
+    session.lookup = Mock(side_effect=[asset, None])
+    session.edit_asset = Mock()
+    confirm = Mock(return_value=False)
+    choose = Mock()
+    monkeypatch.setattr(interactive, "_confirm", confirm)
+    monkeypatch.setattr(interactive, "_choose", choose)
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_print_asset", Mock())
+
+    session.update_asset()
+
+    confirm.assert_called_once_with("Edit this asset?", default=True)
+    choose.assert_not_called()
+    session.edit_asset.assert_not_called()
 
 
 def test_add_back_from_replacement_model_preserves_draft(
@@ -386,6 +548,82 @@ def test_add_asset_uses_auto_assigned_tag(
     assert json.loads(post.content) == {"model_id": 5, "status_id": 9, "serial": "SERIAL-42"}
 
 
+def test_add_label_failure_retries_label_without_recreating_asset(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from inventory import interactive
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    asset = SimpleNamespace(id=42, asset_tag="LFC-42", serial="SN-1", model={})
+    output = config_file.parent / "label-LFC-42.pdf"
+    service = Mock()
+    service.create_asset.return_value = (asset, SimpleNamespace(rollback_errors=[]))
+    service.save_label.side_effect = [OSError("disk full"), str(output)]
+    session = interactive.InteractiveSession(service)
+    session.pick_model = Mock(return_value=SimpleNamespace(id=5, name="Latitude"))
+    session.pick_resource = Mock(return_value=SimpleNamespace(id=9, name="Ready"))
+    choices = Mock(side_effect=[0, 0, interactive.BACK])
+    printed = Mock()
+    monkeypatch.setattr(interactive, "_choose", choices)
+    monkeypatch.setattr(
+        interactive, "_prompt", Mock(side_effect=["SN-1", str(output), str(output)])
+    )
+    monkeypatch.setattr(interactive, "_confirm", Mock(return_value=True))
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_print_review", Mock())
+    monkeypatch.setattr(interactive.console, "print", printed)
+
+    session.add_asset()
+
+    service.create_asset.assert_called_once_with(status_id=9, serial="SN-1", model_id=5)
+    assert service.save_label.call_count == 2
+    assert [attempt.args for attempt in service.save_label.call_args_list] == [
+        (asset, output),
+        (asset, output),
+    ]
+    choices.assert_any_call("Label not saved", ["Retry saving this label"], clear=False)
+    messages = [str(attempt.args[0]) for attempt in printed.call_args_list]
+    assert any("disk full" in message for message in messages)
+    assert any("Asset LFC-42 is saved" in message for message in messages)
+
+
+def test_add_label_failure_escape_keeps_saved_asset_without_retry(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from inventory import interactive
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    asset = SimpleNamespace(id=42, asset_tag="LFC-42", serial="SN-1", model={})
+    output = config_file.parent / "label-LFC-42.pdf"
+    service = Mock()
+    service.create_asset.return_value = (asset, SimpleNamespace(rollback_errors=[]))
+    service.save_label.side_effect = OSError("disk full")
+    session = interactive.InteractiveSession(service)
+    session.pick_model = Mock(return_value=SimpleNamespace(id=5, name="Latitude"))
+    session.pick_resource = Mock(return_value=SimpleNamespace(id=9, name="Ready"))
+    choices = Mock(side_effect=[0, interactive.BACK, interactive.BACK])
+    monkeypatch.setattr(interactive, "_choose", choices)
+    monkeypatch.setattr(
+        interactive, "_prompt", Mock(side_effect=["SN-1", str(output)])
+    )
+    monkeypatch.setattr(interactive, "_confirm", Mock(return_value=True))
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_print_review", Mock())
+
+    session.add_asset()
+
+    service.create_asset.assert_called_once_with(status_id=9, serial="SN-1", model_id=5)
+    service.save_label.assert_called_once_with(asset, output)
+    assert choices.call_args_list[-2].args == (
+        "Label not saved",
+        ["Retry saving this label"],
+    )
+
+
 def test_update_shows_before_after_review_and_saves_name(
     runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
 ) -> None:
@@ -410,13 +648,14 @@ def test_update_shows_before_after_review_and_saves_name(
     result = runner.invoke(
         app,
         ["--config", str(config_file), "interactive"],
-        input="3\nLFC-9\n1\n3\n1\nNew Name\n10\ny\n0\n5\n",
+        input="3\nLFC-9\ny\n3\n1\nNew Name\n10\ny\n0\n5\n",
     )
 
     assert result.exit_code == 0, result.output
     assert "Current" in result.output
     assert "Old Name" in result.output
     assert "New Name" in result.output
+    assert "Edit this asset?" in result.output
     assert "Asset LFC-9 updated" in result.output
 
 
@@ -444,7 +683,7 @@ def test_invalid_number_reprompts_without_losing_staged_changes(
     result = runner.invoke(
         app,
         ["--config", str(config_file), "interactive"],
-        input="3\nLFC-9\n1\n3\n1\nNew Name\n5\n1\n16gb\n16\n10\ny\n0\n5\n",
+        input="3\nLFC-9\ny\n3\n1\nNew Name\n5\n1\n16gb\n16\n10\ny\n0\n5\n",
     )
 
     assert result.exit_code == 0, result.output

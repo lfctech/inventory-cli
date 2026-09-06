@@ -6,12 +6,13 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard, cast
 
 import typer
 from click import Abort
 from InquirerPy import inquirer
 from InquirerPy.base.control import Choice
+from prompt_toolkit.keys import Keys
 from rich.table import Table
 from snipeit.exceptions import (
     SnipeITAuthenticationError,
@@ -29,9 +30,22 @@ from .config import DEFAULT_CONFIG_TEMPLATE, _xdg_config_path
 from .console import console
 from .main import state
 
-BACK = object()
+
+class _BackResult:
+    """Marker returned by guided prompts when Escape requests Back."""
+
+
+BACK = _BackResult()
 _inquirer: Any = inquirer
-_current_page: tuple[str, str | None] | None = None
+_current_page: tuple[str, str | None, str | None] | None = None
+
+_SELECT_HELP = "↑/↓ move • Enter select • Esc back"
+_SELECT_NO_BACK_HELP = "↑/↓ move • Enter select • Ctrl+C exit"
+_FUZZY_HELP = "Type to filter • ↑/↓ move • Enter select • Esc back"
+_TEXT_HELP = "Enter submit • Esc back"
+_CONFIRM_HELP = "Y/N choose • Esc back"
+_CONFIRM_NO_BACK_HELP = "Y/N choose • Ctrl+C exit"
+_ESCAPE_TIMEOUT_SECONDS = 0.05
 
 
 @dataclass
@@ -77,54 +91,95 @@ def _enhanced_prompts() -> bool:
     return _streams_are_tty()
 
 
-def _page(title: str, subtitle: str | None = None) -> None:
+def _page(
+    title: str,
+    subtitle: str | None = None,
+    *,
+    controls: str | None = None,
+    clear: bool = True,
+) -> None:
     global _current_page
 
-    _current_page = (title, subtitle)
-    _redraw_page()
+    _current_page = (title, subtitle, controls)
+    _redraw_page(clear=clear)
 
 
-def _redraw_page() -> None:
-    if _enhanced_prompts():
+def _redraw_page(*, clear: bool = True) -> None:
+    if clear and _enhanced_prompts():
         console.clear()
     if _current_page is None:
         return
-    title, subtitle = _current_page
-    console.print("[bold cyan]INVENTORY[/bold cyan]  [dim]Snipe-IT guided mode[/dim]")
+    title, subtitle, controls = _current_page
     console.print(f"[bold]{title}[/bold]")
+    if controls:
+        console.print(f"[dim]{controls}[/dim]")
     if subtitle:
         console.print(f"[dim]{subtitle}[/dim]")
     console.print()
 
 
+def _tune_escape_timeout(prompt: Any) -> None:
+    """Reduce Prompt Toolkit's default wait before treating Esc as a key."""
+
+    application = getattr(prompt, "application", None)
+    if application is None:
+        session = getattr(prompt, "_session", None)
+        application = getattr(session, "app", None)
+    if application is None:
+        return
+    application.ttimeoutlen = _ESCAPE_TIMEOUT_SECONDS
+    application.timeoutlen = _ESCAPE_TIMEOUT_SECONDS
+
+
+def _install_back_binding(prompt: Any) -> None:
+    """Make Escape return the workflow's internal back result.
+
+    InquirerPy exposes key bindings as prompt-instance state. Registering on the
+    instance keeps the standard Ctrl+C interrupt binding intact while adding the
+    same Escape behavior to text, select, fuzzy, and confirmation prompts.
+    """
+
+    _tune_escape_timeout(prompt)
+    register_kb = cast(Any, getattr(prompt, "register_kb", None))
+    if not callable(register_kb):
+        return
+
+    def _handle_back(event: Any) -> None:
+        status = getattr(prompt, "status", None)
+        if isinstance(status, dict):
+            status["answered"] = True
+            status["result"] = BACK
+        event.app.exit(result=BACK)
+
+    cast(Any, register_kb(Keys.Escape))(_handle_back)
+
+
 def _prompt(text: str, *, default: str | None = None, allow_empty: bool = False) -> str | object:
     while True:
         if _enhanced_prompts():
-            try:
-                value = _inquirer.text(
-                    message=text,
-                    default=default or "",
-                    instruction="(Ctrl+C back)",
-                    mandatory=not allow_empty,
-                    mandatory_message="Enter a value, or press Ctrl+C to go back.",
-                    qmark=">",
-                    amark="✓",
-                ).execute()
-            except KeyboardInterrupt:
-                _redraw_page()
-                return BACK
+            prompt = _inquirer.text(
+                message=text,
+                default=default or "",
+                instruction="",
+                mandatory=not allow_empty,
+                mandatory_message="Enter a value.",
+                qmark=">",
+                amark="✓",
+            )
+            _install_back_binding(prompt)
+            value = prompt.execute()
         else:
             value = typer.prompt(text, default=default, show_default=default is not None)
+        if value is BACK:
+            return BACK
         value = str(value).strip()
         if value == ":back":
-            if _enhanced_prompts():
-                _redraw_page()
+            return BACK
+        if value == "\x1b":
             return BACK
         if value or allow_empty:
-            if _enhanced_prompts():
-                _redraw_page()
             return value
-        console.print("[yellow]A value is required. Press Ctrl+C to go back.[/yellow]")
+        console.print("[yellow]A value is required.[/yellow]")
 
 
 def _choose(
@@ -135,19 +190,34 @@ def _choose(
     clear: bool = True,
     subtitle: str | None = None,
     fuzzy: bool = False,
-) -> int | None:
+    controls: str | None = None,
+) -> int | None | _BackResult:
+    if controls is None:
+        if fuzzy:
+            controls = _FUZZY_HELP if back else _SELECT_NO_BACK_HELP
+        else:
+            controls = _SELECT_HELP if back else _SELECT_NO_BACK_HELP
     if clear:
-        _page(title, subtitle)
+        _page(
+            title,
+            subtitle,
+            controls=controls,
+        )
+    else:
+        _page(
+            title,
+            subtitle,
+            controls=controls,
+            clear=False,
+        )
     if _enhanced_prompts():
         choices = [Choice(index, name=option) for index, option in enumerate(options)]
-        if back:
-            choices.append(Choice(None, name="← Back"))
         use_fuzzy = fuzzy
         prompt = _inquirer.fuzzy if use_fuzzy else _inquirer.select
         kwargs: dict[str, Any] = {
             "message": "Choose an option",
             "choices": choices,
-            "instruction": "(↑/↓ move • Enter select)",
+            "instruction": "",
             "pointer": ">",
             "qmark": ">",
             "amark": "✓",
@@ -157,23 +227,17 @@ def _choose(
         if use_fuzzy:
             kwargs["border"] = True
             kwargs["info"] = False
-        try:
-            return prompt(**kwargs).execute()
-        except KeyboardInterrupt:
-            if not back:
-                raise
-            return None
+        prompt_instance = prompt(**kwargs)
+        if back:
+            _install_back_binding(prompt_instance)
+        return prompt_instance.execute()
 
-    if not clear:
-        console.print(f"\n[bold]{title}[/bold]")
     for index, option in enumerate(options, 1):
         console.print(f"  {index}. {option}")
-    if back:
-        console.print("  0. Back")
     while True:
-        raw = typer.prompt("Choose", default="0" if back else "1")
-        if raw == ":back" or (back and raw == "0"):
-            return None
+        raw = typer.prompt("Choose", default="1")
+        if raw in {":back", "\x1b"} or (back and raw == "0"):
+            return BACK if back else None
         try:
             selected = int(raw)
         except ValueError:
@@ -183,21 +247,30 @@ def _choose(
         console.print("[yellow]Choose one of the listed numbers.[/yellow]")
 
 
-def _confirm(message: str, *, default: bool = False) -> bool | object:
+def _confirm(
+    message: str,
+    *,
+    default: bool = False,
+    back: bool = True,
+) -> bool | object:
     if _enhanced_prompts():
-        try:
-            return bool(
-                _inquirer.confirm(
-                    message=message,
-                    default=default,
-                    instruction=("(Y/n • Ctrl+C back)" if default else "(y/N • Ctrl+C back)"),
-                    qmark=">",
-                    amark="✓",
-                ).execute()
-            )
-        except KeyboardInterrupt:
-            return BACK
+        prompt = _inquirer.confirm(
+            message=message,
+            default=default,
+            instruction="",
+            qmark=">",
+            amark="✓",
+        )
+        if back:
+            _install_back_binding(prompt)
+        return prompt.execute()
     return typer.confirm(message, default=default)
+
+
+def _is_back(value: int | None | _BackResult) -> TypeGuard[None | _BackResult]:
+    """Accept both the current Escape result and the legacy fallback result."""
+
+    return value is BACK or value is None
 
 
 def _name(item: Any) -> str:
@@ -252,13 +325,13 @@ class InteractiveSession:
                     break
                 except SnipeITException as exc:
                     console.print(f"[red]Error:[/red] {_api_message(exc)}")
-                    retry = _choose("What next?", ["Retry this workflow"], clear=False)
-                    if retry is None:
+                    _page("Retry workflow", controls=_CONFIRM_HELP, clear=False)
+                    if _confirm("Retry this workflow?", default=True) is not True:
                         break
                 except (ValueError, RuntimeError) as exc:
                     console.print(f"[red]Error:[/red] {exc}")
-                    retry = _choose("What next?", ["Retry this workflow"], clear=False)
-                    if retry is None:
+                    _page("Retry workflow", controls=_CONFIRM_HELP, clear=False)
+                    if _confirm("Retry this workflow?", default=True) is not True:
                         break
 
     def _print_transaction_error(self, exc: TransactionError) -> None:
@@ -271,10 +344,16 @@ class InteractiveSession:
             for error in exc.rollback_errors:
                 console.print(f"[yellow]Rollback warning:[/yellow] {error}")
         else:
-            console.print("[dim]Any model/manufacturer created by this operation was rolled back.[/dim]")
+            console.print(
+                "[dim]Any model/manufacturer created by this operation was rolled back.[/dim]"
+            )
 
     def lookup(self) -> Asset | None:
-        _page("Find an asset", "Scan a barcode or enter an exact asset tag or serial number.")
+        _page(
+            "Find an asset",
+            "Exact tag or serial match only",
+            controls=_TEXT_HELP,
+        )
         while True:
             identifier = _prompt("Scan or enter asset tag/serial")
             if identifier is BACK:
@@ -282,7 +361,7 @@ class InteractiveSession:
             console.print("[dim]Searching by asset tag and serial…[/dim]")
             matches = self.service.find_asset(str(identifier)).unique
             if not matches:
-                console.print("[yellow]No asset found. Try again or press Ctrl+C.[/yellow]")
+                console.print("[yellow]No asset found. Try again.[/yellow]")
                 continue
             if len(matches) == 1:
                 return matches[0]
@@ -290,9 +369,14 @@ class InteractiveSession:
                 "Both an asset tag and serial matched. Choose the asset",
                 [_asset_label(asset) for asset in matches],
             )
-            if selected is None:
-                _page("Find an asset", "Scan a barcode or enter an exact asset tag or serial number.")
+            if _is_back(selected):
+                _page(
+                    "Find an asset",
+                    "Exact tag or serial match only",
+                    controls=_TEXT_HELP,
+                )
                 continue
+            assert isinstance(selected, int)
             return matches[selected]
 
     def find_asset(self) -> None:
@@ -305,7 +389,7 @@ class InteractiveSession:
                 _page("Asset details", _asset_label(asset))
                 _print_asset(asset, self.config)
                 choice = _choose("What next?", ["Update this asset", "Save its label"], clear=False)
-                if choice is None:
+                if _is_back(choice):
                     break
                 if choice == 0:
                     edited = self.edit_asset(asset, draft)
@@ -326,7 +410,7 @@ class InteractiveSession:
                         "Choose model",
                         [f"Continue with {_model_name(draft.model)}", "Choose a different model"],
                     )
-                    if selected is None:
+                    if _is_back(selected):
                         return
                     if selected == 0:
                         step = AddStep.STATUS
@@ -347,13 +431,15 @@ class InteractiveSession:
                         "Choose status",
                         [f"Continue with {_name(draft.status)}", "Choose a different status"],
                     )
-                    if selected is None:
+                    if _is_back(selected):
                         step = AddStep.MODEL
                         continue
                     if selected == 0:
                         step = AddStep.SERIAL
                         continue
-                status = self.pick_resource("status_labels", "Search status labels", allow_create=False)
+                status = self.pick_resource(
+                    "status_labels", "Search status labels", allow_create=False
+                )
                 if status is BACK:
                     if not had_status:
                         step = AddStep.MODEL
@@ -363,7 +449,11 @@ class InteractiveSession:
                 continue
 
             if step is AddStep.SERIAL:
-                _page("Add an asset", "Snipe-IT will assign the asset tag automatically.")
+                _page(
+                    "Add an asset",
+                    "Snipe-IT will assign the asset tag automatically",
+                    controls=_TEXT_HELP,
+                )
                 serial_value = _prompt(
                     "Scan or enter serial number",
                     default=draft.serial,
@@ -396,7 +486,7 @@ class InteractiveSession:
                     ("Model number", draft.model.model_number or "(blank)"),
                     ("Model notes", draft.model.notes or "(blank)"),
                 ]
-            _page("Review new asset", "Nothing has been written yet.")
+            _page("Review new asset", "Nothing has been written yet", controls=_CONFIRM_HELP)
             _print_review("Create Asset", rows)
             confirmed = _confirm("Create this asset?", default=False)
             if confirmed is BACK:
@@ -421,11 +511,32 @@ class InteractiveSession:
 
     def _after_add(self, asset: Asset) -> None:
         while True:
-            choice = _choose("What next?", ["Save its label", "View the full asset"], clear=False)
-            if choice is None:
+            choice = _choose(
+                "What next?",
+                ["Save its label", "View the full asset"],
+                clear=False,
+                controls="↑/↓ move • Enter select • Esc main menu",
+            )
+            if _is_back(choice):
                 return
             if choice == 0:
-                self.save_label(asset)
+                while True:
+                    try:
+                        self.save_label(asset)
+                        break
+                    except SnipeITException as exc:
+                        message = _api_message(exc)
+                    except (OSError, ValueError, RuntimeError) as exc:
+                        message = str(exc)
+                    console.print(f"[red]Error:[/red] {message}")
+                    console.print(
+                        f"[yellow]Asset {asset.asset_tag} is saved, but its label was not saved.[/yellow]"
+                    )
+                    retry = _choose(
+                        "Label not saved", ["Retry saving this label"], clear=False
+                    )
+                    if _is_back(retry):
+                        break
             else:
                 _page("Asset details", _asset_label(asset))
                 _print_asset(asset, self.config)
@@ -437,10 +548,9 @@ class InteractiveSession:
                 return
             draft = AssetEditDraft()
             while True:
-                _page("Update asset", _asset_label(asset))
+                _page("Update asset", _asset_label(asset), controls=_CONFIRM_HELP)
                 _print_asset(asset, self.config)
-                choice = _choose("What next?", ["Edit this asset"], clear=False)
-                if choice is None:
+                if _confirm("Edit this asset?", default=True) is not True:
                     break
                 edited = self.edit_asset(asset, draft)
                 if edited is not BACK:
@@ -451,8 +561,16 @@ class InteractiveSession:
         while True:
             while True:
                 options = [
-                    "Model", "Status", "Name", "CPU", "RAM", "Storage",
-                    "Touch screen", "PassMark", "Sale price", "Review changes",
+                    "Model",
+                    "Status",
+                    "Name",
+                    "CPU",
+                    "RAM",
+                    "Storage",
+                    "Touch screen",
+                    "PassMark",
+                    "Sale price",
+                    "Review changes",
                 ]
                 staged = len(draft.review_values)
                 choice = _choose(
@@ -460,11 +578,22 @@ class InteractiveSession:
                     options,
                     subtitle=f"{_asset_label(asset)}  •  {staged} staged change{'s' if staged != 1 else ''}",
                 )
-                if choice is None:
+                if _is_back(choice):
                     return BACK
                 if choice == 9:
                     break
-                key = ("model", "status_id", "name", "cpu", "ram", "storage", "touch_screen", "passmark", "sale_price")[choice]
+                assert isinstance(choice, int)
+                key = (
+                    "model",
+                    "status_id",
+                    "name",
+                    "cpu",
+                    "ram",
+                    "storage",
+                    "touch_screen",
+                    "passmark",
+                    "sale_price",
+                )[choice]
                 if key == "model":
                     picked = self.pick_model()
                     if picked is not BACK:
@@ -472,7 +601,9 @@ class InteractiveSession:
                         draft.review_values[key] = _model_name(picked)
                     continue
                 if key == "status_id":
-                    picked = self.pick_resource("status_labels", "Search status labels", allow_create=False)
+                    picked = self.pick_resource(
+                        "status_labels", "Search status labels", allow_create=False
+                    )
                     if picked is not BACK:
                         draft.changes[key] = int(picked.id)
                         draft.review_values[key] = _name(picked)
@@ -485,7 +616,7 @@ class InteractiveSession:
             if not draft.changes and draft.model is None:
                 console.print("[yellow]No changes selected.[/yellow]")
                 continue
-            _page("Review changes", "Nothing has been written yet.")
+            _page("Review changes", "Nothing has been written yet", controls=_CONFIRM_HELP)
             _print_update_review(asset, self.config, draft.review_values)
             confirmed = _confirm("Save these changes?", default=False)
             if confirmed is BACK or not confirmed:
@@ -499,10 +630,12 @@ class InteractiveSession:
             for error in created.rollback_errors:
                 console.print(f"[yellow]{error}[/yellow]")
             _page("Asset updated", _asset_label(asset))
-            console.print(f"[green]✓[/green] Asset [bold]{asset.asset_tag or asset.id}[/bold] updated.")
+            console.print(
+                f"[green]✓[/green] Asset [bold]{asset.asset_tag or asset.id}[/bold] updated."
+            )
             _print_asset(asset, self.config)
             action = _choose("What next?", ["Save its label", "Make another update"], clear=False)
-            if action is None:
+            if _is_back(action):
                 return asset
             if action == 0:
                 self.save_label(asset)
@@ -512,13 +645,17 @@ class InteractiveSession:
     def _edit_value(self, key: str) -> str | int | float | object:
         if key == "touch_screen":
             choice = _choose("Touch screen", ["Yes", "No", "Clear value"])
-            return BACK if choice is None else ("1", "0", "")[choice]
+            if _is_back(choice):
+                return BACK
+            assert isinstance(choice, int)
+            return ("1", "0", "")[choice]
         while True:
             action = _choose(key.replace("_", " ").title(), ["Enter new value", "Clear value"])
-            if action is None:
+            if _is_back(action):
                 return BACK
             if action == 1:
                 return ""
+            _page(key.replace("_", " ").title(), controls=_TEXT_HELP)
             while True:
                 value = _prompt("New value")
                 if value is BACK:
@@ -530,7 +667,7 @@ class InteractiveSession:
                         return float(str(value))
                     return str(value)
                 except ValueError:
-                    console.print("[yellow]Enter a numeric value, or press Ctrl+C to go back.[/yellow]")
+                    console.print("[yellow]Enter a numeric value.[/yellow]")
 
     def label_asset(self) -> None:
         while True:
@@ -538,7 +675,7 @@ class InteractiveSession:
             if asset is None:
                 return
             while True:
-                _page("Save asset label", _asset_label(asset))
+                _page("Save asset label", _asset_label(asset), controls=_CONFIRM_HELP)
                 _print_asset(asset, self.config)
                 confirmed = _confirm("Save a label for this asset?", default=True)
                 if confirmed is BACK:
@@ -550,7 +687,7 @@ class InteractiveSession:
 
     def save_label(self, asset: Asset) -> bool:
         default = f"./label-{asset.asset_tag}.pdf"
-        _page("Save asset label", _asset_label(asset))
+        _page("Save asset label", _asset_label(asset), controls=_TEXT_HELP)
         while True:
             output = _prompt("Output path", default=default)
             if output is BACK:
@@ -558,12 +695,15 @@ class InteractiveSession:
             path = Path(str(output)).expanduser()
             if not path.exists():
                 break
+            _page("Overwrite file", str(path), controls=_CONFIRM_HELP)
             overwrite = _confirm(f"{path} exists. Overwrite it?", default=False)
             if overwrite is BACK:
+                _page("Save asset label", _asset_label(asset), controls=_TEXT_HELP)
                 continue
             if overwrite:
                 break
-            console.print("[dim]Enter another output path, or press Ctrl+C to go back.[/dim]")
+            _page("Save asset label", _asset_label(asset), controls=_TEXT_HELP)
+            console.print("[dim]Enter another output path.[/dim]")
         saved = self.service.save_label(asset, path)
         _page("Label saved")
         console.print(f"[green]✓[/green] Label saved to: [bold]{saved}[/bold]")
@@ -574,8 +714,9 @@ class InteractiveSession:
 
     def pick_resource(self, resource: str, prompt: str, *, allow_create: bool) -> Any:
         query_text: str | None = None
+        title = prompt.removeprefix("Search ").capitalize()
         while True:
-            _page(prompt, "Type a search term. Press Ctrl+C to return.")
+            _page(title, controls=_TEXT_HELP)
             query = _prompt(prompt, default=query_text)
             if query is BACK:
                 return BACK
@@ -586,21 +727,21 @@ class InteractiveSession:
             if allow_create:
                 labels.append("Create a new model")
             if not labels:
-                console.print("[yellow]No matches found. Press Ctrl+C to return.[/yellow]")
+                console.print("[yellow]No matches found. Try again.[/yellow]")
                 continue
             selected = _choose(
                 "Matches",
                 labels,
-                subtitle="Type to filter • ↑/↓ move • Enter select",
                 fuzzy=True,
             )
-            if selected is None:
-                continue
+            if _is_back(selected):
+                return BACK
             if allow_create and selected == len(results):
                 created = self.new_model(query_text)
                 if created is BACK:
                     continue
                 return created
+            assert isinstance(selected, int)
             return results[selected]
 
     def new_model(self, suggested_name: str) -> NewModel | object:
@@ -617,7 +758,11 @@ class InteractiveSession:
 
         while True:
             if step is ModelStep.NAME:
-                _page("Create a new model", "The model will be created only after final review.")
+                _page(
+                    "Create a new model",
+                    "The model will be created only after final review",
+                    controls=_TEXT_HELP,
+                )
                 value = _prompt("Model name", default=name)
                 if value is BACK:
                     return BACK
@@ -643,7 +788,7 @@ class InteractiveSession:
                         "Choose category",
                         [f"Continue with {_name(category)}", "Choose a different category"],
                     )
-                    if selected is None:
+                    if _is_back(selected):
                         step = ModelStep.MANUFACTURER
                         continue
                     if selected == 0:
@@ -660,13 +805,17 @@ class InteractiveSession:
                 step = ModelStep.FIELDSET
                 continue
             if step is ModelStep.FIELDSET:
-                _page("Create a new model", "Choose an optional fieldset.")
+                _page("Create a new model", "Fieldset is optional", controls=_CONFIRM_HELP)
                 if fieldset is not None:
                     selected = _choose(
                         "Choose fieldset",
-                        [f"Continue with {_name(fieldset)}", "Choose a different fieldset", "No fieldset"],
+                        [
+                            f"Continue with {_name(fieldset)}",
+                            "Choose a different fieldset",
+                            "No fieldset",
+                        ],
                     )
-                    if selected is None:
+                    if _is_back(selected):
                         step = ModelStep.CATEGORY
                         continue
                     if selected == 0:
@@ -697,7 +846,7 @@ class InteractiveSession:
                 step = ModelStep.MODEL_NUMBER
                 continue
             if step is ModelStep.MODEL_NUMBER:
-                _page("Create a new model", "Optional model details.")
+                _page("Create a new model", "Optional model details", controls=_TEXT_HELP)
                 value = _prompt("Model number", default=model_number, allow_empty=True)
                 if value is BACK:
                     step = ModelStep.FIELDSET
@@ -705,7 +854,7 @@ class InteractiveSession:
                 model_number = str(value) or None
                 step = ModelStep.NOTES
                 continue
-            _page("Create a new model", "Optional model details.")
+            _page("Create a new model", "Optional model details", controls=_TEXT_HELP)
             value = _prompt("Notes", default=notes, allow_empty=True)
             if value is BACK:
                 step = ModelStep.MODEL_NUMBER
@@ -715,18 +864,24 @@ class InteractiveSession:
 
         assert name is not None and category is not None
         return NewModel(
-            name=str(name), category_id=int(category.id), manufacturer_id=manufacturer_id,
-            manufacturer_name=manufacturer_name, fieldset_id=fieldset_id,
-            model_number=model_number, notes=notes,
+            name=str(name),
+            category_id=int(category.id),
+            manufacturer_id=manufacturer_id,
+            manufacturer_name=manufacturer_name,
+            fieldset_id=fieldset_id,
+            model_number=model_number,
+            notes=notes,
             category_name=_name(category),
             manufacturer_display=manufacturer_name or _name(manufacturer),
             fieldset_name=_name(fieldset) if fieldset_id is not None else None,
         )
 
     def pick_manufacturer(self, current: Any = None) -> Any:
-        query_text = current if isinstance(current, str) else _name(current) if current is not None else None
+        query_text = (
+            current if isinstance(current, str) else _name(current) if current is not None else None
+        )
         while True:
-            _page("Choose manufacturer", "Search existing manufacturers or create a new one.")
+            _page("Choose manufacturer", controls=_TEXT_HELP)
             query = _prompt("Search manufacturers", default=query_text)
             if query is BACK:
                 return BACK
@@ -735,16 +890,16 @@ class InteractiveSession:
             selected = _choose(
                 "Matches",
                 [_resource_label(item) for item in results] + ["Create a new manufacturer"],
-                subtitle="Type to filter • ↑/↓ move • Enter select",
                 fuzzy=True,
             )
-            if selected is None:
-                continue
+            if _is_back(selected):
+                return BACK
             if selected == len(results):
                 value = _prompt("Manufacturer name", default=query_text)
                 if value is BACK:
                     continue
                 return str(value)
+            assert isinstance(selected, int)
             return results[selected]
 
 
@@ -757,15 +912,17 @@ def run_interactive() -> None:
         raise typer.BadParameter("Interactive mode requires a terminal.")
     if state.config is None:
         target = _xdg_config_path()
-        console.print("[yellow]No config.toml was found.[/yellow]")
-        create_config = _confirm(f"Create a starter config at {target}?", default=True)
+        _page("Configuration", "No config.toml was found", controls=_CONFIRM_NO_BACK_HELP)
+        create_config = _confirm(f"Create a starter config at {target}?", default=True, back=False)
         if create_config is True:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(DEFAULT_CONFIG_TEMPLATE)
             console.print(f"[green]✓[/green] Config written to: {target}")
         raise typer.Exit(1)
     if not state.api_key:
-        console.print("[red]Error:[/red] Set SNIPEIT_API_KEY or pass --api-key before using interactive mode.")
+        console.print(
+            "[red]Error:[/red] Set SNIPEIT_API_KEY or pass --api-key before using interactive mode."
+        )
         raise typer.Exit(1)
     try:
         InteractiveSession(InventoryService(get_client())).run()
@@ -790,7 +947,10 @@ def _api_message(exc: SnipeITException) -> str:
 
 
 def _resource_label(item: Any) -> str:
-    details = [str(getattr(item, "model_number", "") or ""), _nested_name(getattr(item, "manufacturer", None))]
+    details = [
+        str(getattr(item, "model_number", "") or ""),
+        _nested_name(getattr(item, "manufacturer", None)),
+    ]
     suffix = " · ".join(value for value in details if value)
     return f"{_name(item)}{f' — {suffix}' if suffix else ''}"
 
@@ -809,8 +969,11 @@ def _print_asset(asset: Asset, config: Any) -> None:
     table.add_column("Field", style="bold")
     table.add_column("Value")
     fields = [
-        ("Asset Tag", asset.asset_tag), ("Serial", asset.serial), ("Name", asset.name),
-        ("Model", _nested_name(asset.model)), ("Status", _nested_name(getattr(asset, "status_label", None))),
+        ("Asset Tag", asset.asset_tag),
+        ("Serial", asset.serial),
+        ("Name", asset.name),
+        ("Model", _nested_name(asset.model)),
+        ("Status", _nested_name(getattr(asset, "status_label", None))),
         ("CPU", _custom(asset, config.custom_fields.cpu_model)),
         ("RAM", _custom(asset, config.custom_fields.ram)),
         ("Storage", _custom(asset, config.custom_fields.storage)),

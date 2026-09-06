@@ -19,8 +19,13 @@ bumps for breaking changes or significant new features, patch bumps for fixes).
 - Polished interactive mode with arrow-key menus, fuzzy filtering for long
   choice lists, consistent screen transitions, clearer page context, and
   keyboard-aware confirmations and text entry.
-- Added screen-level Back navigation: `Ctrl+C` moves back one screen while
-  retaining draft input, and exits only when used from the main menu.
+- Added screen-level Back navigation: `Esc` goes back while retaining draft
+  input and returns to the main menu after adding an asset; `Ctrl+C` exits.
+
+### Bug fixes
+
+- Retain a successfully added asset when label output fails, allowing label-only
+  retry or cancellation without creating the asset again.
 
 ### Code quality
 
