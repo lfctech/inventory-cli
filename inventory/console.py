@@ -28,6 +28,10 @@ class HumanConsole:
     def print_json(self, *args: Any, **kwargs: Any) -> None:
         _stdout.print_json(*args, **kwargs)
 
+    def clear(self) -> None:
+        """Clear an interactive terminal without affecting redirected output."""
+        _stdout.clear()
+
 
 def print_error(message: str) -> None:
     """Emit an error in the active output mode."""

@@ -9,6 +9,7 @@ dependencies = [
     "rich>=13,<16",
     "snipeit-api>=0.5.0,<1",
     "rapidfuzz>=3,<4",
+    "inquirerpy>=0.3.4,<1",
 ]
 
 [project.scripts]
