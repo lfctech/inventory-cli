@@ -884,3 +884,72 @@ def test_update_menu_only_offers_fields_in_asset_fieldset(
 
     offered = choose.call_args.args[1]
     assert offered == ["Model", "Status", "Name", "CPU", "Review changes"]
+
+
+@pytest.mark.parametrize("cleanup_interrupted", [False, True])
+def test_transaction_interrupt_reports_outcome_then_exits_instead_of_reopening_menu(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file, cleanup_interrupted
+) -> None:
+    from inventory import interactive
+    from inventory.application import CreatedResources, MutationOutcome, TransactionError
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    session = interactive.InteractiveSession(Mock())
+    error = TransactionError(
+        ValueError("rejected") if cleanup_interrupted else KeyboardInterrupt(),
+        [],
+        outcome=MutationOutcome.AMBIGUOUS,
+        created=CreatedResources(cleanup_interrupted=cleanup_interrupted),
+    )
+    session.add_asset = Mock(side_effect=error)
+    session._print_transaction_error = Mock()
+    choose = Mock(return_value=1)
+    monkeypatch.setattr(interactive, "_choose", choose)
+
+    with pytest.raises(KeyboardInterrupt):
+        session.run()
+
+    session._print_transaction_error.assert_called_once_with(error)
+    assert choose.call_count == 1
+
+
+@pytest.mark.parametrize("refresh_verified", [True, False])
+def test_post_update_recovery_never_repeats_the_saved_update(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file, refresh_verified
+) -> None:
+    from snipeit.exceptions import SnipeITTimeoutError
+
+    from inventory import interactive
+    from inventory.application import CreatedResources
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    asset = cast(
+        Any,
+        SimpleNamespace(
+            id=42, asset_tag="LFC-42", serial="SN", model={}, custom_fields={}, refresh=Mock()
+        ),
+    )
+    created = CreatedResources(refresh_verified=refresh_verified)
+    service = Mock()
+    service.update_asset.return_value = (asset, created)
+    session = interactive.InteractiveSession(service)
+    session.save_label = Mock(side_effect=[SnipeITTimeoutError("label timeout"), True])
+    choices = [3] + ([] if refresh_verified else [0]) + [0, 0]
+    monkeypatch.setattr(interactive, "_choose", Mock(side_effect=choices))
+    monkeypatch.setattr(interactive, "_confirm", Mock(return_value=True))
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_print_asset", Mock())
+    monkeypatch.setattr(interactive, "_print_update_review", Mock())
+    draft = interactive.AssetEditDraft(
+        changes={"name": "Changed"}, review_values={"name": "Changed"}
+    )
+
+    assert session.edit_asset(asset, draft) is asset
+
+    service.update_asset.assert_called_once_with(asset, state.config, changes={"name": "Changed"})
+    assert session.save_label.call_args_list == [call(asset), call(asset)]
+    assert asset.refresh.call_count == (0 if refresh_verified else 1)

@@ -10,7 +10,6 @@ from typing import Any
 from snipeit import SnipeIT
 from snipeit.exceptions import (
     SnipeITApiError,
-    SnipeITException,
     SnipeITNotFoundError,
     SnipeITServerError,
     SnipeITTimeoutError,
@@ -75,6 +74,7 @@ class CreatedResources:
     refresh_error: str | None = None
     in_flight: str | None = None
     mutation_confirmed: bool = False
+    cleanup_interrupted: bool = False
 
 
 class TransactionError(RuntimeError):
@@ -158,6 +158,7 @@ class InventoryService:
             raise ValueError("Provide exactly one of model_id or new_model.")
         created = CreatedResources()
         asset: Asset | None = None
+        asset_id: int | str | None = None
         try:
             if new_model is not None:
                 model_id = self._create_model(new_model, created)
@@ -166,11 +167,13 @@ class InventoryService:
                 payload["serial"] = serial
             created.in_flight = "asset"
             asset = self.client.assets.create(**payload)
-            created.in_flight = None
-            if asset.id is None:
+            asset_id = asset.id
+            if asset_id is None:
                 raise _AmbiguousMutationError(
                     "Asset may have been created, but the server returned no ID."
                 )
+            created.mutation_confirmed = True
+            created.in_flight = None
             created.outcome = MutationOutcome.COMPLETED
             return asset, created
         except BaseException as exc:
@@ -185,7 +188,7 @@ class InventoryService:
                 exc,
                 created.rollback_errors,
                 outcome=outcome,
-                asset_id=asset.id if asset is not None else None,
+                asset_id=asset_id,
                 created=created,
             ) from exc
 
@@ -245,12 +248,13 @@ class InventoryService:
                 continue
             try:
                 getattr(self.client, resource).delete(record_id)
-            except SnipeITException as exc:
+            except Exception as exc:
                 created.rollback_errors.append(f"Could not delete {resource[:-1]} {record_id}: {exc}")
                 # A manufacturer may still be referenced by a model whose
                 # deletion failed. Do not continue with dependent cleanup.
                 break
             except KeyboardInterrupt:
+                created.cleanup_interrupted = True
                 created.rollback_errors.append(
                     f"Cleanup interrupted while deleting {resource[:-1]} {record_id}; "
                     "reconcile related records in Snipe-IT."
@@ -312,6 +316,16 @@ class InventoryService:
             ) from exc
         try:
             asset.refresh()
+        except KeyboardInterrupt as exc:
+            created.refresh_verified = False
+            created.refresh_error = "Refresh interrupted."
+            raise TransactionError(
+                exc,
+                created.rollback_errors,
+                outcome=MutationOutcome.COMPLETED,
+                asset_id=asset.id,
+                created=created,
+            ) from exc
         except Exception as exc:
             created.refresh_verified = False
             created.refresh_error = str(exc)

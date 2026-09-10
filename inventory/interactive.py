@@ -341,6 +341,10 @@ class InteractiveSession:
                     break
                 except TransactionError as exc:
                     self._print_transaction_error(exc)
+                    if isinstance(exc.cause, KeyboardInterrupt) or (
+                        exc.created is not None and exc.created.cleanup_interrupted
+                    ):
+                        raise KeyboardInterrupt from exc
                     break
                 except SnipeITAuthenticationError as exc:
                     console.print(f"[red]Error:[/red] {_api_message(exc)}")
@@ -365,7 +369,7 @@ class InteractiveSession:
         if exc.outcome is MutationOutcome.COMPLETED:
             asset_text = f" Asset ID {exc.asset_id} is known." if exc.asset_id is not None else ""
             console.print(
-                "[yellow]The asset update was saved; do not retry this workflow."
+                "[yellow]The asset was saved; do not retry this workflow."
                 f"{asset_text} Reconcile the displayed state in Snipe-IT if needed.[/yellow]"
             )
         elif exc.outcome is MutationOutcome.AMBIGUOUS:
