@@ -74,6 +74,7 @@ class CreatedResources:
     refresh_verified: bool = True
     refresh_error: str | None = None
     in_flight: str | None = None
+    mutation_confirmed: bool = False
 
 
 class TransactionError(RuntimeError):
@@ -156,6 +157,7 @@ class InventoryService:
         if (model_id is None) == (new_model is None):
             raise ValueError("Provide exactly one of model_id or new_model.")
         created = CreatedResources()
+        asset: Asset | None = None
         try:
             if new_model is not None:
                 model_id = self._create_model(new_model, created)
@@ -164,6 +166,7 @@ class InventoryService:
                 payload["serial"] = serial
             created.in_flight = "asset"
             asset = self.client.assets.create(**payload)
+            created.mutation_confirmed = True
             created.in_flight = None
             if asset.id is None:
                 raise _AmbiguousMutationError(
@@ -183,6 +186,7 @@ class InventoryService:
                 exc,
                 created.rollback_errors,
                 outcome=outcome,
+                asset_id=asset.id if asset is not None else None,
                 created=created,
             ) from exc
 
@@ -193,7 +197,6 @@ class InventoryService:
                 raise ValueError("A manufacturer selection or new manufacturer name is required.")
             created.in_flight = "manufacturer"
             manufacturer = self.client.manufacturers.create(name=spec.manufacturer_name)
-            created.in_flight = None
             if manufacturer.id is None:
                 raise _AmbiguousMutationError(
                     "Manufacturer may have been created, but the server returned no ID."
@@ -205,6 +208,7 @@ class InventoryService:
                     "Manufacturer may have been created, but its ID was invalid."
                 ) from exc
             created.manufacturer_id = manufacturer_id
+            created.in_flight = None
 
         payload: dict[str, Any] = {
             "name": spec.name,
@@ -219,7 +223,6 @@ class InventoryService:
             payload["notes"] = spec.notes
         created.in_flight = "model"
         model = self.client.models.create(**payload)
-        created.in_flight = None
         if model.id is None:
             raise _AmbiguousMutationError(
                 "Model may have been created, but the server returned no ID."
@@ -230,6 +233,7 @@ class InventoryService:
             raise _AmbiguousMutationError(
                 "Model may have been created, but its ID was invalid."
             ) from exc
+        created.in_flight = None
         assert created.model_id is not None
         return created.model_id
 
@@ -281,6 +285,7 @@ class InventoryService:
                     asset.set_custom_field(label, "" if value == "" else str(value))
             created.in_flight = "asset"
             asset.save()
+            created.mutation_confirmed = True
             created.in_flight = None
         except BaseException as exc:
             outcome = _mutation_outcome(exc, created)
@@ -355,6 +360,8 @@ def _mutation_outcome(exc: BaseException, created: CreatedResources) -> Mutation
 
     if isinstance(exc, _AmbiguousMutationError):
         return MutationOutcome.AMBIGUOUS
+    if created.mutation_confirmed:
+        return MutationOutcome.AMBIGUOUS
     if isinstance(exc, KeyboardInterrupt):
         return (
             MutationOutcome.AMBIGUOUS
@@ -363,8 +370,16 @@ def _mutation_outcome(exc: BaseException, created: CreatedResources) -> Mutation
         )
     if isinstance(exc, (SnipeITTimeoutError, SnipeITServerError)):
         return MutationOutcome.AMBIGUOUS
-    if isinstance(exc, SnipeITException) and not isinstance(exc, SnipeITApiError):
+    if isinstance(exc, SnipeITApiError):
+        # A typed 4xx response, or a 2xx response carrying an explicit API
+        # error, proves that the mutation was rejected. A 5xx is handled
+        # above because the server may have committed before failing.
+        status = exc.status_code
+        if status is None or status < 500:
+            return MutationOutcome.ROLLED_BACK
         return MutationOutcome.AMBIGUOUS
-    if isinstance(exc, RuntimeError):
+    if created.in_flight is not None:
         return MutationOutcome.AMBIGUOUS
+    if isinstance(exc, (RuntimeError, ValueError)):
+        return MutationOutcome.ROLLED_BACK
     return MutationOutcome.ROLLED_BACK

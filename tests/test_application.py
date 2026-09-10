@@ -196,6 +196,43 @@ def test_missing_model_id_is_ambiguous_without_deleting_manufacturer() -> None:
     client.manufacturers.delete.assert_not_called()
 
 
+def test_post_dispatch_value_error_is_ambiguous_without_unsafe_cleanup() -> None:
+    client = Mock()
+    client.manufacturers.create.return_value = SimpleNamespace(id=2)
+    client.models.create.return_value = SimpleNamespace(id=3)
+    client.assets.create.side_effect = ValueError("invalid response")
+    spec = NewModel(name="Model", category_id=1, manufacturer_name="New Mfg")
+
+    with pytest.raises(TransactionError) as raised:
+        InventoryService(client).create_asset(status_id=4, serial="SN", new_model=spec)
+
+    assert raised.value.outcome is MutationOutcome.AMBIGUOUS
+    client.models.delete.assert_not_called()
+    client.manufacturers.delete.assert_not_called()
+
+
+def test_interrupt_after_confirmed_save_does_not_roll_back_new_model(config_file) -> None:
+    from inventory.config import load_config
+
+    client = Mock()
+    client.models.create.return_value = SimpleNamespace(id=3)
+    asset = Mock()
+    asset.id = 42
+    asset.refresh.side_effect = KeyboardInterrupt
+    spec = NewModel(name="Model", category_id=1, manufacturer_id=2)
+
+    with pytest.raises(KeyboardInterrupt):
+        InventoryService(client).update_asset(
+            asset,
+            load_config(config_file),
+            {"name": "Changed"},
+            new_model=spec,
+        )
+
+    asset.save.assert_called_once_with()
+    client.models.delete.assert_not_called()
+
+
 def test_update_rejects_custom_field_missing_from_asset_fieldset(config_file) -> None:
     from inventory.config import load_config
 
