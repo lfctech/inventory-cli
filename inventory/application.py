@@ -166,7 +166,6 @@ class InventoryService:
                 payload["serial"] = serial
             created.in_flight = "asset"
             asset = self.client.assets.create(**payload)
-            created.mutation_confirmed = True
             created.in_flight = None
             if asset.id is None:
                 raise _AmbiguousMutationError(
@@ -248,6 +247,15 @@ class InventoryService:
                 getattr(self.client, resource).delete(record_id)
             except SnipeITException as exc:
                 created.rollback_errors.append(f"Could not delete {resource[:-1]} {record_id}: {exc}")
+                # A manufacturer may still be referenced by a model whose
+                # deletion failed. Do not continue with dependent cleanup.
+                break
+            except KeyboardInterrupt:
+                created.rollback_errors.append(
+                    f"Cleanup interrupted while deleting {resource[:-1]} {record_id}; "
+                    "reconcile related records in Snipe-IT."
+                )
+                break
 
     def update_asset(
         self,
@@ -304,7 +312,7 @@ class InventoryService:
             ) from exc
         try:
             asset.refresh()
-        except SnipeITException as exc:
+        except Exception as exc:
             created.refresh_verified = False
             created.refresh_error = str(exc)
         return asset, created
@@ -361,7 +369,7 @@ def _mutation_outcome(exc: BaseException, created: CreatedResources) -> Mutation
     if isinstance(exc, _AmbiguousMutationError):
         return MutationOutcome.AMBIGUOUS
     if created.mutation_confirmed:
-        return MutationOutcome.AMBIGUOUS
+        return MutationOutcome.COMPLETED
     if isinstance(exc, KeyboardInterrupt):
         return (
             MutationOutcome.AMBIGUOUS

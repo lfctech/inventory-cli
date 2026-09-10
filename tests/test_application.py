@@ -15,7 +15,14 @@ from snipeit.exceptions import (
 )
 from snipeit.resources.assets import Asset
 
-from inventory.application import InventoryService, MutationOutcome, NewModel, TransactionError
+from inventory.application import (
+    CreatedResources,
+    InventoryService,
+    MutationOutcome,
+    NewModel,
+    TransactionError,
+    _mutation_outcome,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -126,6 +133,7 @@ def test_transaction_error_preserves_rollback_failures() -> None:
 
     assert raised.value.rollback_errors
     assert "Could not delete model 3" in raised.value.rollback_errors[0]
+    client.manufacturers.delete.assert_not_called()
 
 
 def test_update_does_not_roll_back_when_refresh_fails_after_save(config_file) -> None:
@@ -231,6 +239,12 @@ def test_interrupt_after_confirmed_save_does_not_roll_back_new_model(config_file
 
     asset.save.assert_called_once_with()
     client.models.delete.assert_not_called()
+
+
+def test_ctrl_c_after_related_calls_complete_is_safe_to_rollback() -> None:
+    created = CreatedResources(model_id=3, manufacturer_id=2)
+
+    assert _mutation_outcome(KeyboardInterrupt(), created) is MutationOutcome.ROLLED_BACK
 
 
 def test_update_rejects_custom_field_missing_from_asset_fieldset(config_file) -> None:

@@ -362,7 +362,13 @@ class InteractiveSession:
         else:
             message = str(exc.cause)
         console.print(f"[red]Error:[/red] {message}")
-        if exc.outcome is MutationOutcome.AMBIGUOUS:
+        if exc.outcome is MutationOutcome.COMPLETED:
+            asset_text = f" Asset ID {exc.asset_id} is known." if exc.asset_id is not None else ""
+            console.print(
+                "[yellow]The asset update was saved; do not retry this workflow."
+                f"{asset_text} Reconcile the displayed state in Snipe-IT if needed.[/yellow]"
+            )
+        elif exc.outcome is MutationOutcome.AMBIGUOUS:
             asset_text = f" Asset ID {exc.asset_id} is known." if exc.asset_id is not None else ""
             resource_ids: list[str] = []
             if exc.created is not None:
@@ -408,8 +414,9 @@ class InteractiveSession:
                 matches = self.service.find_asset(identifier_text).unique
             except SnipeITAuthenticationError:
                 raise
-            except SnipeITException as exc:
-                console.print(f"[red]Error:[/red] {_api_message(exc)}")
+            except Exception as exc:
+                message = _api_message(exc) if isinstance(exc, SnipeITException) else str(exc)
+                console.print(f"[red]Error:[/red] {message}")
                 _page(
                     "Find an asset",
                     f"Search failed for {identifier_text}; retry or press Esc to cancel",
@@ -762,9 +769,10 @@ class InteractiveSession:
                 return
             try:
                 asset.refresh()
-            except SnipeITException as exc:
+            except Exception as exc:
                 created.refresh_error = str(exc)
-                console.print(f"[yellow]Refresh still failed:[/yellow] {_api_message(exc)}")
+                message = _api_message(exc) if isinstance(exc, SnipeITException) else str(exc)
+                console.print(f"[yellow]Refresh still failed:[/yellow] {message}")
                 continue
             created.refresh_verified = True
             created.refresh_error = None
@@ -864,8 +872,9 @@ class InteractiveSession:
                 results = self.service.search(resource, query_text)
             except SnipeITAuthenticationError:
                 raise
-            except SnipeITException as exc:
-                console.print(f"[red]Error:[/red] {_api_message(exc)}")
+            except Exception as exc:
+                message = _api_message(exc) if isinstance(exc, SnipeITException) else str(exc)
+                console.print(f"[red]Error:[/red] {message}")
                 _page(
                     title,
                     f"Search failed for {query_text}; retry or press Esc to cancel",
@@ -1040,8 +1049,9 @@ class InteractiveSession:
                 results = self.service.search("manufacturers", query_text)
             except SnipeITAuthenticationError:
                 raise
-            except SnipeITException as exc:
-                console.print(f"[red]Error:[/red] {_api_message(exc)}")
+            except Exception as exc:
+                message = _api_message(exc) if isinstance(exc, SnipeITException) else str(exc)
+                console.print(f"[red]Error:[/red] {message}")
                 _page(
                     "Choose manufacturer",
                     f"Search failed for {query_text}; retry or press Esc to cancel",
