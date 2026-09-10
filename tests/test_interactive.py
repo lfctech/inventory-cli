@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 from typer.testing import CliRunner
@@ -463,7 +464,7 @@ def test_label_output_back_returns_to_selected_asset_confirmation(
     state.config = load_config(config_file)
     session = interactive.InteractiveSession(Mock())
     asset = SimpleNamespace(id=1, asset_tag="LFC-1", serial="SN", model={"name": "Model"})
-    session.lookup = Mock(return_value=asset)
+    session.lookup = Mock(side_effect=[asset, None])
     session.save_label = Mock(return_value=False)
     monkeypatch.setattr(interactive, "_confirm", Mock(side_effect=[True, False]))
     monkeypatch.setattr(interactive, "_page", Mock())
@@ -692,3 +693,263 @@ def test_invalid_number_reprompts_without_losing_staged_changes(
     body = json.loads(patch.content)
     assert body["name"] == "New Name"
     assert body["_snipeit_ram_gb_3"] == "16"
+
+
+def test_find_label_failure_stays_on_asset_without_parent_retry(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from inventory import interactive
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    asset = SimpleNamespace(id=42, asset_tag="LFC-42", serial="SN-1", model={})
+    service = Mock()
+    service.save_label.side_effect = OSError("disk full")
+    session = interactive.InteractiveSession(service)
+    session.lookup = Mock(side_effect=[asset, None])
+    monkeypatch.setattr(
+        interactive,
+        "_choose",
+        Mock(side_effect=[1, interactive.BACK, interactive.BACK]),
+    )
+    monkeypatch.setattr(interactive, "_prompt", Mock(return_value="label.pdf"))
+    monkeypatch.setattr(interactive, "_confirm", Mock(return_value=True))
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_print_asset", Mock())
+
+    session.find_asset()
+
+    assert session.lookup.call_count == 2
+    service.save_label.assert_called_once_with(asset, Path("label.pdf"))
+
+
+def test_direct_label_failure_can_cancel_without_repeating_lookup(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from inventory import interactive
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    asset = SimpleNamespace(id=42, asset_tag="LFC-42", serial="SN-1", model={})
+    service = Mock()
+    service.save_label.side_effect = OSError("disk full")
+    session = interactive.InteractiveSession(service)
+    session.lookup = Mock(side_effect=[asset, None])
+    monkeypatch.setattr(interactive, "_choose", Mock(return_value=interactive.BACK))
+    monkeypatch.setattr(interactive, "_prompt", Mock(return_value="label.pdf"))
+    monkeypatch.setattr(interactive, "_confirm", Mock(side_effect=[True, False]))
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_print_asset", Mock())
+
+    session.label_asset()
+
+    session.lookup.assert_called_once_with()
+    service.save_label.assert_called_once_with(asset, Path("label.pdf"))
+
+
+def test_numeric_editor_rejects_negative_and_non_finite_values(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from inventory import interactive
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    session = interactive.InteractiveSession(Mock())
+    monkeypatch.setattr(interactive, "_choose", Mock(return_value=0))
+    monkeypatch.setattr(interactive, "_page", Mock())
+
+    monkeypatch.setattr(interactive, "_prompt", Mock(side_effect=["-8", "16"]))
+    assert session._edit_value("ram") == 16
+    monkeypatch.setattr(
+        interactive,
+        "_prompt",
+        Mock(side_effect=["nan", "inf", "-1", "125"]),
+    )
+    assert session._edit_value("sale_price") == 125
+
+
+def test_lookup_retries_same_identifier_after_api_error(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from snipeit.exceptions import SnipeITTimeoutError
+    from snipeit.resources.assets import Asset
+
+    from inventory import interactive
+    from inventory.application import AssetMatches
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    asset = SimpleNamespace(id=42, asset_tag="LFC-42", serial="SN-1", model={})
+    service = Mock()
+    service.find_asset.side_effect = [
+        SnipeITTimeoutError("timed out"),
+        AssetMatches(tag=cast(Asset, asset)),
+    ]
+    session = interactive.InteractiveSession(service)
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_prompt", Mock(side_effect=["SCAN-1", "SCAN-1"]))
+
+    assert session.lookup() is asset
+    assert service.find_asset.call_args_list == [call("SCAN-1"), call("SCAN-1")]
+
+
+def test_resource_search_retries_same_query_after_api_error(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from snipeit.exceptions import SnipeITTimeoutError
+
+    from inventory import interactive
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    result = SimpleNamespace(id=5, name="Latitude")
+    service = Mock()
+    service.search.side_effect = [SnipeITTimeoutError("timed out"), [result]]
+    session = interactive.InteractiveSession(service)
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_prompt", Mock(side_effect=["Latitude", "Latitude"]))
+    monkeypatch.setattr(interactive, "_choose", Mock(return_value=0))
+
+    assert session.pick_resource("models", "Search models", allow_create=False) is result
+    assert service.search.call_args_list == [call("models", "Latitude"), call("models", "Latitude")]
+
+
+def test_update_review_includes_all_new_model_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    from inventory import interactive
+
+    asset = Mock(model={"name": "Old"}, status_label={"name": "Ready"}, name="")
+    asset.get_custom_field.return_value = ""
+    config = SimpleNamespace(
+        custom_fields=SimpleNamespace(
+            cpu_model="CPU",
+            ram="RAM",
+            storage="Storage",
+            touch_screen="Touchscreen",
+            cpu_passmark="PassMark",
+            sale_price="Sale Price",
+        )
+    )
+    model = interactive.NewModel(
+        name="New Model",
+        category_id=2,
+        category_name="Laptops",
+        manufacturer_name="Acme",
+        manufacturer_display="Acme",
+        fieldset_name="Refurbishing",
+        fieldset_id=3,
+        model_number="NM-1",
+        notes="New notes",
+    )
+    table = Mock()
+    monkeypatch.setattr(interactive, "Table", Mock(return_value=table))
+
+    interactive._print_update_review(
+        asset,
+        config,
+        {"model": "New Model", **interactive._new_model_review_values(model)},
+    )
+
+    rendered = " ".join(str(call.args) for call in table.add_row.call_args_list)
+    for value in ("Acme", "Laptops", "Refurbishing", "NM-1", "New notes"):
+        assert value in rendered
+
+
+def test_update_menu_only_offers_fields_in_asset_fieldset(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from inventory import interactive
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    session = interactive.InteractiveSession(Mock())
+    asset = cast(
+        Any,
+        SimpleNamespace(
+            asset_tag="LFC-1",
+            serial="SN-1",
+            model={"name": "Model"},
+            custom_fields={"CPU": {"field": "_snipeit_cpu_1", "value": ""}},
+        ),
+    )
+    choose = Mock(return_value=interactive.BACK)
+    monkeypatch.setattr(interactive, "_choose", choose)
+
+    assert session.edit_asset(asset) is interactive.BACK
+
+    offered = choose.call_args.args[1]
+    assert offered == ["Model", "Status", "Name", "CPU", "Review changes"]
+
+
+@pytest.mark.parametrize("cleanup_interrupted", [False, True])
+def test_transaction_interrupt_reports_outcome_then_exits_instead_of_reopening_menu(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file, cleanup_interrupted
+) -> None:
+    from inventory import interactive
+    from inventory.application import CreatedResources, MutationOutcome, TransactionError
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    session = interactive.InteractiveSession(Mock())
+    error = TransactionError(
+        ValueError("rejected") if cleanup_interrupted else KeyboardInterrupt(),
+        [],
+        outcome=MutationOutcome.AMBIGUOUS,
+        created=CreatedResources(cleanup_interrupted=cleanup_interrupted),
+    )
+    session.add_asset = Mock(side_effect=error)
+    session._print_transaction_error = Mock()
+    choose = Mock(return_value=1)
+    monkeypatch.setattr(interactive, "_choose", choose)
+
+    with pytest.raises(KeyboardInterrupt):
+        session.run()
+
+    session._print_transaction_error.assert_called_once_with(error)
+    assert choose.call_count == 1
+
+
+@pytest.mark.parametrize("refresh_verified", [True, False])
+def test_post_update_recovery_never_repeats_the_saved_update(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file, refresh_verified
+) -> None:
+    from snipeit.exceptions import SnipeITTimeoutError
+
+    from inventory import interactive
+    from inventory.application import CreatedResources
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    asset = cast(
+        Any,
+        SimpleNamespace(
+            id=42, asset_tag="LFC-42", serial="SN", model={}, custom_fields={}, refresh=Mock()
+        ),
+    )
+    created = CreatedResources(refresh_verified=refresh_verified)
+    service = Mock()
+    service.update_asset.return_value = (asset, created)
+    session = interactive.InteractiveSession(service)
+    session.save_label = Mock(side_effect=[SnipeITTimeoutError("label timeout"), True])
+    choices = [3] + ([] if refresh_verified else [0]) + [0, 0]
+    monkeypatch.setattr(interactive, "_choose", Mock(side_effect=choices))
+    monkeypatch.setattr(interactive, "_confirm", Mock(return_value=True))
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_print_asset", Mock())
+    monkeypatch.setattr(interactive, "_print_update_review", Mock())
+    draft = interactive.AssetEditDraft(
+        changes={"name": "Changed"}, review_values={"name": "Changed"}
+    )
+
+    assert session.edit_asset(asset, draft) is asset
+
+    service.update_asset.assert_called_once_with(asset, state.config, changes={"name": "Changed"})
+    assert session.save_label.call_args_list == [call(asset), call(asset)]
+    assert asset.refresh.call_count == (0 if refresh_verified else 1)
