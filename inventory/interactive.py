@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -25,7 +26,7 @@ from snipeit.exceptions import (
 )
 from snipeit.resources.assets import Asset
 
-from .application import InventoryService, NewModel, TransactionError
+from .application import InventoryService, MutationOutcome, NewModel, TransactionError
 from .config import DEFAULT_CONFIG_TEMPLATE, _xdg_config_path
 from .console import console
 from .main import state
@@ -46,6 +47,27 @@ _TEXT_HELP = "Enter submit • Esc back"
 _CONFIRM_HELP = "Y/N choose • Esc back"
 _CONFIRM_NO_BACK_HELP = "Y/N choose • Ctrl+C exit"
 _ESCAPE_TIMEOUT_SECONDS = 0.05
+_CUSTOM_EDIT_KEYS = {"cpu", "ram", "storage", "touch_screen", "passmark", "sale_price"}
+_CUSTOM_EDIT_ORDER = ("cpu", "ram", "storage", "touch_screen", "passmark", "sale_price")
+_EDIT_LABELS = {
+    "model": "Model",
+    "status_id": "Status",
+    "name": "Name",
+    "cpu": "CPU",
+    "ram": "RAM",
+    "storage": "Storage",
+    "touch_screen": "Touch screen",
+    "passmark": "PassMark",
+    "sale_price": "Sale price",
+    "review": "Review changes",
+}
+_NEW_MODEL_REVIEW_KEYS = (
+    ("new_model_manufacturer", "New manufacturer"),
+    ("new_model_category", "Category"),
+    ("new_model_fieldset", "Fieldset"),
+    ("new_model_number", "Model number"),
+    ("new_model_notes", "Model notes"),
+)
 
 
 @dataclass
@@ -340,10 +362,28 @@ class InteractiveSession:
         else:
             message = str(exc.cause)
         console.print(f"[red]Error:[/red] {message}")
+        if exc.outcome is MutationOutcome.AMBIGUOUS:
+            asset_text = f" Asset ID {exc.asset_id} is known." if exc.asset_id is not None else ""
+            resource_ids: list[str] = []
+            if exc.created is not None:
+                if exc.created.model_id is not None:
+                    resource_ids.append(f"model {exc.created.model_id}")
+                if exc.created.manufacturer_id is not None:
+                    resource_ids.append(f"manufacturer {exc.created.manufacturer_id}")
+            related_text = (
+                f" Known related records: {', '.join(resource_ids)}."
+                if resource_ids
+                else ""
+            )
+            console.print(
+                "[yellow]Mutation outcome is ambiguous; do not retry this workflow."
+                f"{asset_text}{related_text} Reconcile the asset and any related records "
+                "in Snipe-IT first.[/yellow]"
+            )
         if exc.rollback_errors:
             for error in exc.rollback_errors:
                 console.print(f"[yellow]Rollback warning:[/yellow] {error}")
-        else:
+        elif exc.outcome is MutationOutcome.ROLLED_BACK:
             console.print(
                 "[dim]Any model/manufacturer created by this operation was rolled back.[/dim]"
             )
@@ -354,12 +394,29 @@ class InteractiveSession:
             "Exact tag or serial match only",
             controls=_TEXT_HELP,
         )
+        identifier_text: str | None = None
         while True:
-            identifier = _prompt("Scan or enter asset tag/serial")
+            identifier = _prompt(
+                "Scan or enter asset tag/serial",
+                default=identifier_text,
+            )
             if identifier is BACK:
                 return None
+            identifier_text = str(identifier)
             console.print("[dim]Searching by asset tag and serial…[/dim]")
-            matches = self.service.find_asset(str(identifier)).unique
+            try:
+                matches = self.service.find_asset(identifier_text).unique
+            except SnipeITAuthenticationError:
+                raise
+            except SnipeITException as exc:
+                console.print(f"[red]Error:[/red] {_api_message(exc)}")
+                _page(
+                    "Find an asset",
+                    f"Search failed for {identifier_text}; retry or press Esc to cancel",
+                    controls=_TEXT_HELP,
+                    clear=False,
+                )
+                continue
             if not matches:
                 console.print("[yellow]No asset found. Try again.[/yellow]")
                 continue
@@ -397,7 +454,7 @@ class InteractiveSession:
                         asset = edited
                         draft = AssetEditDraft()
                 else:
-                    self.save_label(asset)
+                    self._save_label_with_recovery(asset)
 
     def add_asset(self) -> None:
         draft = AddAssetDraft()
@@ -520,26 +577,29 @@ class InteractiveSession:
             if _is_back(choice):
                 return
             if choice == 0:
-                while True:
-                    try:
-                        self.save_label(asset)
-                        break
-                    except SnipeITException as exc:
-                        message = _api_message(exc)
-                    except (OSError, ValueError, RuntimeError) as exc:
-                        message = str(exc)
-                    console.print(f"[red]Error:[/red] {message}")
-                    console.print(
-                        f"[yellow]Asset {asset.asset_tag} is saved, but its label was not saved.[/yellow]"
-                    )
-                    retry = _choose(
-                        "Label not saved", ["Retry saving this label"], clear=False
-                    )
-                    if _is_back(retry):
-                        break
+                self._save_label_with_recovery(asset)
             else:
                 _page("Asset details", _asset_label(asset))
                 _print_asset(asset, self.config)
+
+    def _save_label_with_recovery(self, asset: Asset) -> bool:
+        """Save one label while retaining the asset on any recoverable error."""
+
+        while True:
+            try:
+                return self.save_label(asset)
+            except SnipeITException as exc:
+                message = _api_message(exc)
+            except (OSError, ValueError, RuntimeError) as exc:
+                message = str(exc)
+            console.print(f"[red]Error:[/red] {message}")
+            console.print(
+                f"[yellow]Asset {asset.asset_tag or asset.id} is saved, "
+                "but its label was not saved.[/yellow]"
+            )
+            retry = _choose("Label not saved", ["Retry saving this label"], clear=False)
+            if _is_back(retry):
+                return False
 
     def update_asset(self) -> None:
         while True:
@@ -560,18 +620,12 @@ class InteractiveSession:
         draft = draft or AssetEditDraft()
         while True:
             while True:
-                options = [
-                    "Model",
-                    "Status",
-                    "Name",
-                    "CPU",
-                    "RAM",
-                    "Storage",
-                    "Touch screen",
-                    "PassMark",
-                    "Sale price",
-                    "Review changes",
-                ]
+                option_keys = ["model", "status_id", "name"]
+                option_keys.extend(
+                    key for key in _CUSTOM_EDIT_ORDER if self._custom_field_supported(asset, key)
+                )
+                option_keys.append("review")
+                options = [_EDIT_LABELS[key] for key in option_keys]
                 staged = len(draft.review_values)
                 choice = _choose(
                     "Update asset",
@@ -580,25 +634,25 @@ class InteractiveSession:
                 )
                 if _is_back(choice):
                     return BACK
-                if choice == 9:
+                if choice == len(option_keys) - 1:
                     break
                 assert isinstance(choice, int)
-                key = (
-                    "model",
-                    "status_id",
-                    "name",
-                    "cpu",
-                    "ram",
-                    "storage",
-                    "touch_screen",
-                    "passmark",
-                    "sale_price",
-                )[choice]
+                key = option_keys[choice]
                 if key == "model":
+                    if set(draft.changes) & _CUSTOM_EDIT_KEYS:
+                        console.print(
+                            "[yellow]Save the staged custom-field changes first; then choose "
+                            "the model change so the target fieldset is known.[/yellow]"
+                        )
+                        continue
                     picked = self.pick_model()
                     if picked is not BACK:
                         draft.model = picked
                         draft.review_values[key] = _model_name(picked)
+                        for review_key, _ in _NEW_MODEL_REVIEW_KEYS:
+                            draft.review_values.pop(review_key, None)
+                        if isinstance(picked, NewModel):
+                            draft.review_values.update(_new_model_review_values(picked))
                     continue
                 if key == "status_id":
                     picked = self.pick_resource(
@@ -607,6 +661,14 @@ class InteractiveSession:
                     if picked is not BACK:
                         draft.changes[key] = int(picked.id)
                         draft.review_values[key] = _name(picked)
+                    continue
+                if key in _CUSTOM_EDIT_KEYS and not self._custom_field_available(asset, key):
+                    continue
+                if key in _CUSTOM_EDIT_KEYS and draft.model is not None:
+                    console.print(
+                        "[yellow]Save the model change first; then edit custom fields "
+                        "so the target fieldset is known.[/yellow]"
+                    )
                     continue
                 value = self._edit_value(key)
                 if value is not BACK:
@@ -629,18 +691,84 @@ class InteractiveSession:
             asset, created = self.service.update_asset(asset, self.config, **kwargs)
             for error in created.rollback_errors:
                 console.print(f"[yellow]{error}[/yellow]")
-            _page("Asset updated", _asset_label(asset))
-            console.print(
-                f"[green]✓[/green] Asset [bold]{asset.asset_tag or asset.id}[/bold] updated."
-            )
+            if created.refresh_verified:
+                _page("Asset updated", _asset_label(asset))
+                console.print(
+                    f"[green]✓[/green] Asset [bold]{asset.asset_tag or asset.id}[/bold] updated."
+                )
+            else:
+                _page(
+                    "Asset saved; refresh not verified",
+                    _asset_label(asset),
+                    controls=_CONFIRM_HELP,
+                )
+                console.print(
+                    f"[yellow]Asset [bold]{asset.asset_tag or asset.id}[/bold] was saved, "
+                    "but Snipe-IT could not verify the refreshed state.[/yellow]"
+                )
+                self._offer_refresh(asset, created)
             _print_asset(asset, self.config)
+            if not created.refresh_verified:
+                return asset
             action = _choose("What next?", ["Save its label", "Make another update"], clear=False)
             if _is_back(action):
                 return asset
             if action == 0:
-                self.save_label(asset)
+                self._save_label_with_recovery(asset)
                 return asset
             _clear_edit_draft(draft)
+
+    def _custom_field_available(self, asset: Asset, key: str) -> bool:
+        label = self._custom_field_label(key)
+        custom_fields = getattr(asset, "custom_fields", None)
+        if not isinstance(custom_fields, dict):
+            console.print(
+                "[yellow]This asset's custom-field fieldset is unavailable; "
+                "refresh it before editing.[/yellow]"
+            )
+            return False
+        if label not in custom_fields:
+            console.print(
+                f"[yellow]Custom field {label!r} is not available on this asset's "
+                "model fieldset.[/yellow]"
+            )
+            return False
+        return True
+
+    def _custom_field_label(self, key: str) -> str:
+        return {
+            "cpu": self.config.custom_fields.cpu_model,
+            "ram": self.config.custom_fields.ram,
+            "storage": self.config.custom_fields.storage,
+            "touch_screen": self.config.custom_fields.touch_screen,
+            "passmark": self.config.custom_fields.cpu_passmark,
+            "sale_price": self.config.custom_fields.sale_price,
+        }[key]
+
+    def _custom_field_supported(self, asset: Asset, key: str) -> bool:
+        custom_fields = getattr(asset, "custom_fields", None)
+        return isinstance(custom_fields, dict) and self._custom_field_label(key) in custom_fields
+
+    def _offer_refresh(self, asset: Asset, created: Any) -> None:
+        """Offer a read-only refresh after a successful but unverified save."""
+
+        while not created.refresh_verified:
+            action = _choose(
+                "Refresh verification",
+                ["Retry refresh", "Continue with saved asset"],
+                clear=False,
+            )
+            if _is_back(action) or action == 1:
+                return
+            try:
+                asset.refresh()
+            except SnipeITException as exc:
+                created.refresh_error = str(exc)
+                console.print(f"[yellow]Refresh still failed:[/yellow] {_api_message(exc)}")
+                continue
+            created.refresh_verified = True
+            created.refresh_error = None
+            console.print("[green]✓[/green] Asset state refreshed from Snipe-IT.")
 
     def _edit_value(self, key: str) -> str | int | float | object:
         if key == "touch_screen":
@@ -662,9 +790,19 @@ class InteractiveSession:
                     break
                 try:
                     if key in {"ram", "storage", "passmark"}:
-                        return int(str(value))
+                        parsed = int(str(value))
+                        if parsed < 0:
+                            console.print("[yellow]Enter a non-negative integer.[/yellow]")
+                            continue
+                        return parsed
                     if key == "sale_price":
-                        return float(str(value))
+                        parsed_price = float(str(value))
+                        if not math.isfinite(parsed_price) or parsed_price < 0:
+                            console.print(
+                                "[yellow]Enter a finite, non-negative number.[/yellow]"
+                            )
+                            continue
+                        return parsed_price
                     return str(value)
                 except ValueError:
                     console.print("[yellow]Enter a numeric value.[/yellow]")
@@ -682,7 +820,7 @@ class InteractiveSession:
                     break
                 if not confirmed:
                     return
-                if self.save_label(asset):
+                if self._save_label_with_recovery(asset):
                     return
 
     def save_label(self, asset: Asset) -> bool:
@@ -722,7 +860,19 @@ class InteractiveSession:
                 return BACK
             query_text = str(query)
             console.print("[dim]Searching Snipe-IT…[/dim]")
-            results = self.service.search(resource, query_text)
+            try:
+                results = self.service.search(resource, query_text)
+            except SnipeITAuthenticationError:
+                raise
+            except SnipeITException as exc:
+                console.print(f"[red]Error:[/red] {_api_message(exc)}")
+                _page(
+                    title,
+                    f"Search failed for {query_text}; retry or press Esc to cancel",
+                    controls=_TEXT_HELP,
+                    clear=False,
+                )
+                continue
             labels = [_resource_label(item) for item in results]
             if allow_create:
                 labels.append("Create a new model")
@@ -886,7 +1036,19 @@ class InteractiveSession:
             if query is BACK:
                 return BACK
             query_text = str(query)
-            results = self.service.search("manufacturers", query_text)
+            try:
+                results = self.service.search("manufacturers", query_text)
+            except SnipeITAuthenticationError:
+                raise
+            except SnipeITException as exc:
+                console.print(f"[red]Error:[/red] {_api_message(exc)}")
+                _page(
+                    "Choose manufacturer",
+                    f"Search failed for {query_text}; retry or press Esc to cancel",
+                    controls=_TEXT_HELP,
+                    clear=False,
+                )
+                continue
             selected = _choose(
                 "Matches",
                 [_resource_label(item) for item in results] + ["Create a new manufacturer"],
@@ -995,7 +1157,11 @@ def _print_review(title: str, rows: list[tuple[str, str]]) -> None:
     console.print(table)
 
 
-def _print_update_review(asset: Asset, config: Any, values: dict[str, str]) -> None:
+def _print_update_review(
+    asset: Asset,
+    config: Any,
+    values: dict[str, str],
+) -> None:
     current = {
         "model": _nested_name(asset.model),
         "status_id": _nested_name(getattr(asset, "status_label", None)),
@@ -1013,5 +1179,21 @@ def _print_update_review(asset: Asset, config: Any, values: dict[str, str]) -> N
     table.add_column("Current")
     table.add_column("New value")
     for key, value in values.items():
-        table.add_row(labels.get(key, key.replace("_", " ").title()), current[key], value)
+        if key.startswith("new_model_"):
+            label = dict(_NEW_MODEL_REVIEW_KEYS)[key]
+            table.add_row(label, "(new model)", value)
+        else:
+            table.add_row(labels.get(key, key.replace("_", " ").title()), current[key], value)
     console.print(table)
+
+
+def _new_model_review_values(model: NewModel) -> dict[str, str]:
+    """Render all related records that a new-model update will create."""
+
+    return {
+        "new_model_manufacturer": model.manufacturer_display or "(existing)",
+        "new_model_category": model.category_name or str(model.category_id),
+        "new_model_fieldset": model.fieldset_name or "(none)",
+        "new_model_number": model.model_number or "(blank)",
+        "new_model_notes": model.notes or "(blank)",
+    }
