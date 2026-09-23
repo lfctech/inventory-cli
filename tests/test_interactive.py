@@ -886,6 +886,64 @@ def test_update_menu_only_offers_fields_in_asset_fieldset(
     assert offered == ["Model", "Status", "Name", "CPU", "Review changes"]
 
 
+def test_find_requires_fresh_lookup_after_unverified_model_change(
+    monkeypatch: pytest.MonkeyPatch, reset_state, config_file
+) -> None:
+    from snipeit.resources.assets import Asset
+
+    from inventory import interactive
+    from inventory.application import CreatedResources
+    from inventory.config import load_config
+    from inventory.main import state
+
+    state.config = load_config(config_file)
+    asset = cast(Any, Asset)(
+        Mock(),
+        {
+            "id": 42,
+            "asset_tag": "LFC-42",
+            "serial": "SN-42",
+            "model": {"id": 1, "name": "Old model"},
+            "custom_fields": {"CPU": {"field": "_snipeit_cpu_1", "value": "Old CPU"}},
+        },
+    )
+    service = Mock()
+    created = CreatedResources(refresh_verified=False)
+
+    def save_model_change(saved_asset: Asset, *_args: Any, **_kwargs: Any):
+        # The pinned client preserves the old fieldset when PATCH returns null
+        # custom_fields; only a successful GET refresh replaces this mapping.
+        saved_asset._apply_server_data(
+            {"model": {"id": 2, "name": "New model"}, "custom_fields": None}
+        )
+        return saved_asset, created
+
+    service.update_asset.side_effect = save_model_change
+    session = interactive.InteractiveSession(service)
+    session.lookup = Mock(side_effect=[asset, None])
+    session.pick_model = Mock(return_value=SimpleNamespace(id=2, name="New model"))
+    session._save_label_with_recovery = Mock(return_value=True)
+    choose = Mock(side_effect=[0, 0, 4, 1, 0, 1])
+    monkeypatch.setattr(interactive, "_choose", choose)
+    monkeypatch.setattr(interactive, "_confirm", Mock(return_value=True))
+    monkeypatch.setattr(interactive, "_page", Mock())
+    monkeypatch.setattr(interactive, "_print_asset", Mock())
+    monkeypatch.setattr(interactive, "_print_update_review", Mock())
+
+    session.find_asset()
+
+    assert asset.custom_fields["CPU"]["field"] == "_snipeit_cpu_1"
+    service.update_asset.assert_called_once_with(
+        asset, state.config, changes={}, model_id=2
+    )
+    assert [call.args[1] for call in choose.call_args_list[-2:]] == [
+        ["Save its label", "Look up asset again"],
+        ["Save its label", "Look up asset again"],
+    ]
+    session._save_label_with_recovery.assert_called_once_with(asset)
+    assert session.lookup.call_count == 2
+
+
 @pytest.mark.parametrize("cleanup_interrupted", [False, True])
 def test_transaction_interrupt_reports_outcome_then_exits_instead_of_reopening_menu(
     monkeypatch: pytest.MonkeyPatch, reset_state, config_file, cleanup_interrupted

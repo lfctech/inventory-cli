@@ -84,6 +84,13 @@ class AssetEditDraft:
     model: Any = None
 
 
+@dataclass(frozen=True)
+class _UnverifiedAsset:
+    """A saved asset that must be looked up again before another edit."""
+
+    asset: Asset
+
+
 class AddStep(Enum):
     MODEL = auto()
     STATUS = auto()
@@ -453,7 +460,21 @@ class InteractiveSession:
             if asset is None:
                 return
             draft = AssetEditDraft()
+            refresh_unverified = False
             while True:
+                if refresh_unverified:
+                    _page("Asset saved; refresh not verified", _asset_label(asset))
+                    console.print(
+                        "[yellow]Look up this asset again before making another update; "
+                        "its details may have changed.[/yellow]"
+                    )
+                    choice = _choose(
+                        "What next?", ["Save its label", "Look up asset again"], clear=False
+                    )
+                    if _is_back(choice) or choice == 1:
+                        break
+                    self._save_label_with_recovery(asset)
+                    continue
                 _page("Asset details", _asset_label(asset))
                 _print_asset(asset, self.config)
                 choice = _choose("What next?", ["Update this asset", "Save its label"], clear=False)
@@ -464,6 +485,10 @@ class InteractiveSession:
                     if isinstance(edited, Asset):
                         asset = edited
                         draft = AssetEditDraft()
+                    elif isinstance(edited, _UnverifiedAsset):
+                        asset = edited.asset
+                        draft = AssetEditDraft()
+                        refresh_unverified = True
                 else:
                     self._save_label_with_recovery(asset)
 
@@ -718,9 +743,9 @@ class InteractiveSession:
                     "but Snipe-IT could not verify the refreshed state.[/yellow]"
                 )
                 self._offer_refresh(asset, created)
-            _print_asset(asset, self.config)
             if not created.refresh_verified:
-                return asset
+                return _UnverifiedAsset(asset)
+            _print_asset(asset, self.config)
             action = _choose("What next?", ["Save its label", "Make another update"], clear=False)
             if _is_back(action):
                 return asset
