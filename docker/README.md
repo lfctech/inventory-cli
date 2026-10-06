@@ -26,3 +26,9 @@ SNIPEIT_IMAGE=snipe/snipe-it:latest-alpine make test-e2e
 ## `.env`
 
 The `.env` file is committed intentionally. It contains only local dev bootstrap values (no real secrets). See the comment block at the top of the file.
+
+## Snipe-IT version coverage
+
+CI runs the live CLI suite against both Snipe-IT 8.7.2 and 8.8.0. To run the
+8.8.0 lane locally, use
+`SNIPEIT_IMAGE=snipe/snipe-it:v8.8.0-alpine make test-e2e`.
