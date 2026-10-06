@@ -7,6 +7,15 @@ bumps for breaking changes or significant new features, patch bumps for fixes).
 
 ## Unreleased
 
+### Bug fixes
+
+- Pin the Python client to the immutable label repair revision, supporting the
+  official JSON/base64 PDF response as well as raw PDFs. Invalid responses fail
+  without replacing an existing label.
+- Exercise serial lookup and label output through the CLI, and parse a real
+  label PDF in the live 8.7.2/8.8.0 end-to-end matrix instead of relying on mocked
+  raw-PDF success responses.
+
 ### Dependencies
 
 - Require AnyIO 4.14.2 or newer within v4 and lock 4.14.2 to address

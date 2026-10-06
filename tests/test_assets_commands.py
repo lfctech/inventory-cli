@@ -8,6 +8,7 @@ without standing up a real Snipe-IT.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 
@@ -802,3 +803,102 @@ def test_file_delete_json_prompt_does_not_corrupt_stdout(
     assert result.exit_code == 0, result.stderr
     assert json.loads(strip_ansi(result.stdout)) == {"status": "success"}
     assert "delete file 42" in strip_ansi(result.stderr)
+
+
+@pytest.mark.parametrize("response_format", ["json", "pdf"])
+def test_label_by_serial_saves_exact_pdf(
+    runner: CliRunner,
+    fake_env,
+    reset_state,
+    config_file,
+    httpx_mock,
+    tmp_path,
+    response_format: str,
+) -> None:
+    pdf = b"%PDF-1.7\n\x00\xfflabel fixture\n%%EOF\n"
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{TEST_URL}/api/v1/hardware/byserial/7YPNP32",
+        json={
+            "total": 1,
+            "rows": [asset_payload(asset_id=1015, asset_tag="001639", serial="7YPNP32")],
+        },
+    )
+    response = (
+        {"json": {"status": "success", "payload": {"pdf": base64.b64encode(pdf).decode("ascii")}}}
+        if response_format == "json"
+        else {"content": pdf, "headers": {"Content-Type": "application/pdf"}}
+    )
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{TEST_URL}/api/v1/hardware/labels",
+        **response,
+    )
+    output = tmp_path / "nested" / "label.pdf"
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_file),
+            "assets",
+            "label",
+            "--serial",
+            "7YPNP32",
+            "--output",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert output.read_bytes() == pdf
+    request = httpx_mock.get_requests()[-1]
+    assert json.loads(request.content) == {"asset_tags": ["001639"]}
+    assert request.headers["Accept"] == "application/pdf, application/json"
+
+
+@pytest.mark.parametrize(
+    "status,body",
+    [
+        (500, {"message": "Server Error"}),
+        (200, {"status": "error", "payload": None}),
+        (200, {"status": "success", "payload": {"pdf": "SGVsbG8="}}),
+    ],
+)
+def test_label_errors_fail_without_overwriting(
+    runner: CliRunner,
+    fake_env,
+    reset_state,
+    config_file,
+    httpx_mock,
+    tmp_path,
+    status: int,
+    body: dict,
+) -> None:
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{TEST_URL}/api/v1/hardware/1",
+        json=asset_payload(asset_id=1),
+    )
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{TEST_URL}/api/v1/hardware/labels",
+        status_code=status,
+        json=body,
+    )
+    output = tmp_path / "label.pdf"
+    output.write_bytes(b"previous label")
+    result = runner.invoke(
+        app,
+        [
+            "--config",
+            str(config_file),
+            "assets",
+            "label",
+            "--id",
+            "1",
+            "--output",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Error:" in result.stderr
+    assert output.read_bytes() == b"previous label"

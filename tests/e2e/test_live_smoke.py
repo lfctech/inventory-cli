@@ -4,6 +4,7 @@ import contextlib
 from pathlib import Path
 
 import pytest
+from pypdf import PdfReader
 from snipeit import SnipeIT
 from typer.testing import CliRunner
 
@@ -329,3 +330,41 @@ def test_assets_files_upload_list_download_delete_against_live_snipeit(
         if asset_id is not None:
             with contextlib.suppress(Exception):
                 real_snipeit_client.assets.delete(asset_id)
+
+
+def test_label_by_serial_against_live_snipeit(
+    runner: CliRunner,
+    config_file,
+    real_snipeit_client: SnipeIT,
+    base,
+    run_id: str,
+    tmp_path: Path,
+) -> None:
+    client = real_snipeit_client
+    serial = unique_name("label-serial", run_id)
+    asset = client.assets.create(
+        status_id=id_int(base["status"]),
+        model_id=id_int(base["model"]),
+        asset_tag=unique_name("label-tag", run_id),
+        serial=serial,
+    )
+    try:
+        output = tmp_path / "nested" / "label.pdf"
+        result = runner.invoke(
+            app,
+            [
+                "--config",
+                str(config_file),
+                "assets",
+                "label",
+                "--serial",
+                serial,
+                "--output",
+                str(output),
+            ],
+        )
+        assert result.exit_code == 0, result.stderr
+        assert output.read_bytes().startswith(b"%PDF-")
+        assert len(PdfReader(output).pages) >= 1
+    finally:
+        client.assets.delete(id_int(asset))
