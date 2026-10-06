@@ -44,8 +44,14 @@ jobs:
         run: uv run pytest -q -m "not integration"
 
   e2e:
-    name: e2e (live Snipe-IT)
+    name: e2e (Snipe-IT ${{ matrix.snipeit-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        snipeit-version: ["8.7.2", "8.8.0"]
+    env:
+      SNIPEIT_IMAGE: snipe/snipe-it:v${{ matrix.snipeit-version }}-alpine
     # Only spin up the Docker stack once the cheap lint/type/unit lane is green.
     needs: test
 
