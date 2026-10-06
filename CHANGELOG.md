@@ -7,6 +7,15 @@ bumps for breaking changes or significant new features, patch bumps for fixes).
 
 ## Unreleased
 
+### Dependencies
+
+- Pin `snipeit-api` to released v0.5.2 with its exact lockfile commit and require
+  at least 0.5.2 for installs that do not use uv's source override.
+
+### Tests and CI
+
+- Run live CLI integration CI against both Snipe-IT 8.7.2 and 8.8.0.
+
 ### New features
 
 - Added guided interactive mode through both `inventory interactive` and
