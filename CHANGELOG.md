@@ -9,6 +9,9 @@ bumps for breaking changes or significant new features, patch bumps for fixes).
 
 ### Dependencies
 
+- Require AnyIO 4.14.2 or newer within v4 and lock 4.14.2 to address
+  GHSA-82r6-8w77-94w6 and GHSA-5p39-cfhj-2xmp, including consumer installs
+  that resolve dependencies independently. Preserve the released API pin.
 - Pin `snipeit-api` to released v0.5.2 with its exact lockfile commit and require
   at least 0.5.2 for installs that do not use uv's source override.
 

@@ -5,6 +5,7 @@ description = "CLI tool for managing Snipe-IT inventory assets"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "anyio>=4.14.2,<5",
     "typer>=0.12,<1",
     "rich>=13,<16",
     "snipeit-api>=0.5.2,<1",
