@@ -21,7 +21,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv.sources]
-snipeit-api = { git = "https://github.com/lfctech/snipeit-python-api", tag = "v0.5.2" }
+snipeit-api = { git = "https://github.com/lfctech/snipeit-python-api", rev = "fe70b4ed610139d33305d138ad1b1fa3b75063ec" }
 
 [tool.setuptools.packages.find]
 include = ["inventory*"]
@@ -31,6 +31,7 @@ inventory = ["data/*.csv"]
 
 [dependency-groups]
 dev = [
+    "pypdf>=6,<7",
     "pyright>=1.1.409,<2",
     "ruff>=0.15.12,<1",
     "pytest>=8,<10",
