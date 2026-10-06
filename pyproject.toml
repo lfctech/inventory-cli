@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "typer>=0.12,<1",
     "rich>=13,<16",
-    "snipeit-api>=0.5.0,<1",
+    "snipeit-api>=0.5.2,<1",
     "rapidfuzz>=3,<4",
     "inquirerpy>=0.3.4,<1",
 ]
@@ -20,7 +20,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv.sources]
-snipeit-api = { git = "https://github.com/lfctech/snipeit-python-api", tag = "v0.5.0" }
+snipeit-api = { git = "https://github.com/lfctech/snipeit-python-api", tag = "v0.5.2" }
 
 [tool.setuptools.packages.find]
 include = ["inventory*"]

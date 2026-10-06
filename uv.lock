@@ -155,7 +155,7 @@ requires-dist = [
     { name = "inquirerpy", specifier = ">=0.3.4,<1" },
     { name = "rapidfuzz", specifier = ">=3,<4" },
     { name = "rich", specifier = ">=13,<16" },
-    { name = "snipeit-api", git = "https://github.com/lfctech/snipeit-python-api?tag=v0.5.0" },
+    { name = "snipeit-api", git = "https://github.com/lfctech/snipeit-python-api?tag=v0.5.2" },
     { name = "typer", specifier = ">=0.12,<1" },
 ]
 
@@ -459,8 +459,8 @@ wheels = [
 
 [[package]]
 name = "snipeit-api"
-version = "0.5.0"
-source = { git = "https://github.com/lfctech/snipeit-python-api?tag=v0.5.0#32211c93c1ef44d2d5ae42dfcdda04ec4aa9b8b5" }
+version = "0.5.2"
+source = { git = "https://github.com/lfctech/snipeit-python-api?tag=v0.5.2#3bac8133c8334b051712a5db99aa06212ce2eef6" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
