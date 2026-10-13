@@ -31,7 +31,7 @@ inventory = ["data/*.csv"]
 
 [dependency-groups]
 dev = [
-    "pypdf>=6,<7",
+    "pypdf>=6.20.1,<7",
     "pyright>=1.1.409,<2",
     "ruff>=0.15.12,<1",
     "pytest>=8,<10",
