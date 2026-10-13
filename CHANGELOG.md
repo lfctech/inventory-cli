@@ -7,6 +7,12 @@ bumps for breaking changes or significant new features, patch bumps for fixes).
 
 ## Unreleased
 
+### Test dependencies
+
+- Require and lock pypdf 6.20.1 for live label-PDF validation, incorporating
+  upstream stream-decoding limits and cyclic-tree hardening. This is a
+  development-only update; the CLI runtime and Python-client pin are unchanged.
+
 ### Bug fixes
 
 - Pin the Python client to the immutable label repair revision, supporting the
