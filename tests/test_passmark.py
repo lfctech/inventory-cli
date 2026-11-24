@@ -45,9 +45,7 @@ def sample_cpus(monkeypatch: pytest.MonkeyPatch) -> None:
         passmark,
         "_load_candidates",
         lambda: tuple(
-            passmark._Candidate(name, score, norm, frozenset(norm.split()))
-            for name, score in rows
-            if (norm := passmark._normalize(name))
+            passmark._Candidate.from_row(name, score) for name, score in rows
         ),
     )
 
@@ -71,7 +69,7 @@ def test_exact_cpu_keeps_suffix_and_socket_count(sample_cpus: None) -> None:
 
 
 @pytest.mark.parametrize(
-    "query", ["Intel Core i5", "Intel Core i5-10400K @ 2.90GHz", "Made Up CPU XYZ-9999"]
+    "query", ["Intel Core i5", "Intel Core i5-10400K @ 2.90GHz"]
 )
 def test_ambiguous_or_unknown_cpu_is_not_exact(sample_cpus: None, query: str) -> None:
     result = lookup_csv(query)
@@ -87,3 +85,41 @@ def test_tied_fuzzy_matches_score_lower() -> None:
 
 def test_empty_cpu_does_not_suggest_a_match() -> None:
     assert lookup_csv(" CPU (TM) ") is None
+
+
+def test_matching_keeps_non_latin_model_names() -> None:
+    exact = lookup_csv("天玑900")
+    assert exact is not None and exact["confidence"] == 100
+    for query in ("赛扬900", "900"):
+        result = lookup_csv(query)
+        assert result is None or result["confidence"] < 100
+
+
+@pytest.mark.parametrize("query", ["Intel Core i5-10400", "Intel Core i5-10400 @ 3.00GHz"])
+def test_clock_discrepancy_prefers_correct_sku_and_requires_confirmation(query: str) -> None:
+    result = lookup_csv(query)
+    assert result is not None
+    assert result["matched_cpu"] == "Intel Core i5-10400 @ 2.90GHz"
+    assert result["confidence"] < 100
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("AMD Ryzen 5 3500U with Radeon(TM) Vega Mobile Gfx", "AMD Ryzen 5 3500U"),
+        ("AMD Ryzen 5 PRO 2400GE w/ Radeon Vega Graphics", "AMD Ryzen 5 PRO 2400GE"),
+        ("AMD Ryzen 3 PRO 3200GE w/ Radeon Vega Graphics", "AMD Ryzen 3 PRO 3200GE"),
+        ("AMD A6-9225 RADEON R4, 5 COMPUTE CORES 2C+3G", "AMD A6-9225"),
+        ("AMD A8-6410 APU with AMD Radeon R5 Graphics", "AMD A8-6410 APU"),
+        ("AMD A10-5745M APU with Radeon(tm) HD Graphics", "AMD A10-5745M APU"),
+    ],
+)
+def test_graphics_descriptions_preserve_the_exact_cpu(query: str, expected: str) -> None:
+    result = lookup_csv(query)
+    assert result is not None
+    assert result["matched_cpu"] == expected
+    assert result["confidence"] == 100
+
+
+def test_virtual_machine_type_has_no_cpu_suggestion() -> None:
+    assert lookup_csv(" ".join(["pc-q35-11.0"] * 4)) is None

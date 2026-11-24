@@ -647,7 +647,7 @@ def test_price_unresolved_passmark_errors_out(
     )
     assert result.exit_code == 1
     assert "could not resolve passmark score" in result.stderr.lower()
-    assert "Accept this match?" in result.output
+    assert ("Accept this match?" in result.output) == (confidence is not None)
     assert not any(r.method == "PATCH" for r in httpx_mock.get_requests())
 
 
