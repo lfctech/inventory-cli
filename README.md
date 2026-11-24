@@ -216,8 +216,11 @@ Tiers and bonuses are configurable in `config.toml`.
 
 1. `--passmark` CLI flag → used directly
 2. Existing `cpu_passmark` value in Snipe-IT → used silently
-3. Fuzzy match against bundled `PassmarkCPUList.csv` → auto-accept if ≥ 80% confidence
-4. Low confidence → prompt operator to confirm
+3. Match against the bundled PassMark CSV using DebugOS's matching rules. A unique
+   normalized exact match reports 100% confidence and is accepted automatically.
+4. Fuzzy matches and duplicate exact matches require operator confirmation. The
+   legacy `[passmark].fuzzy_threshold` setting no longer enables automatic
+   acceptance of fuzzy matches.
 
 ---
 

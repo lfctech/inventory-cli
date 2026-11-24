@@ -54,7 +54,7 @@ touch_screen_bonus = 20
 desktop_penalty    = 3
 
 [passmark]
-fuzzy_threshold = 80  # confidence % below which operator is prompted
+fuzzy_threshold = 80  # legacy; only unique exact matches auto-accept
 """
 
 
