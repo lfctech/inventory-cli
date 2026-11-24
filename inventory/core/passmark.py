@@ -35,6 +35,14 @@ _NOISE = re.compile(
 )
 _NON_ALNUM = re.compile(r"[\W_]+")
 _CLOCK_SUFFIX = re.compile(r"\s*@\s*\d+(?:\.\d+)?\s*[gm]hz\s*$", re.IGNORECASE)
+# Omit hardware specifications when extracting the model number.
+_HARDWARE_SPEC = re.compile(
+    r"\b\d+(?:\.\d+)?\s*[gm]hz\b|\b\d+[-\s]+(?:cores?|threads?)\b", re.IGNORECASE
+)
+_MODEL_QUALIFIERS = frozenset({
+    "athlon", "atom", "celeron", "epyc", "pentium", "ryzen", "xeon",
+    "pro", "max", "ultra", "plus", "gold", "silver", "platinum", "bronze",
+})
 
 
 class PassmarkResult(TypedDict):
@@ -49,11 +57,13 @@ class _Candidate(NamedTuple):
     normalized: str
     tokens: frozenset[str]
     model: str
+    identifiers: frozenset[str]
 
     @classmethod
     def from_row(cls, name: str, score: int) -> _Candidate:
         normalized = _normalize(name)
-        return cls(name, score, normalized, frozenset(normalized.split()), _model(name, normalized))
+        model = _model(name, normalized)
+        return cls(name, score, normalized, frozenset(normalized.split()), model, _identifiers(name))
 
 
 def _normalize(name: str) -> str:
@@ -66,6 +76,15 @@ def _model(name: str, normalized: str) -> str:
     """Keep the full model designation, omitting only an explicit trailing clock."""
     clock = _CLOCK_SUFFIX.search(name)
     return _normalize(name[:clock.start()]) if clock else normalized
+
+
+def _identifiers(name: str) -> frozenset[str]:
+    """Keep complete model tokens, including family tiers, revisions and SKU suffixes."""
+    tokens = _normalize(_HARDWARE_SPEC.sub(" ", name)).split()
+    numbers = {token for token in tokens if any(char.isdigit() for char in token)}
+    if numbers:
+        numbers.update(_MODEL_QUALIFIERS.intersection(tokens))
+    return frozenset(numbers)
 
 
 @functools.lru_cache(maxsize=1)
@@ -132,7 +151,10 @@ def lookup_csv(cpu_name: str) -> PassmarkResult | None:
         # model first so a single-digit change to the SKU cannot outrank it.
         model = _model(cpu_name, query)
         same_model = [candidate for candidate in candidates if model and candidate.model == model]
-        pool = same_model or candidates
+        required = _identifiers(cpu_name)
+        pool = same_model or [candidate for candidate in candidates if required <= candidate.identifiers]
+        if not pool:
+            return None
         best = pool[0]
         best_score = second_score = -1
         ties = 0

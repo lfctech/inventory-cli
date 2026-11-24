@@ -68,11 +68,8 @@ def test_exact_cpu_keeps_suffix_and_socket_count(sample_cpus: None) -> None:
     assert result == {"matched_cpu": "AMD Ryzen 5 5600X", "score": 20000, "confidence": 100}
 
 
-@pytest.mark.parametrize(
-    "query", ["Intel Core i5", "Intel Core i5-10400K @ 2.90GHz"]
-)
-def test_ambiguous_or_unknown_cpu_is_not_exact(sample_cpus: None, query: str) -> None:
-    result = lookup_csv(query)
+def test_ambiguous_family_is_not_exact(sample_cpus: None) -> None:
+    result = lookup_csv("Intel Core i5")
     assert result is not None
     assert result["confidence"] < 100
 
@@ -123,3 +120,19 @@ def test_graphics_descriptions_preserve_the_exact_cpu(query: str, expected: str)
 
 def test_virtual_machine_type_has_no_cpu_suggestion() -> None:
     assert lookup_csv(" ".join(["pc-q35-11.0"] * 4)) is None
+
+
+@pytest.mark.parametrize("query", [
+    "Intel Core i5-10400K @ 2.90GHz", "i5-8250U", "8250U",
+    "Intel Core i7-10400", "AMD Ryzen 5 PRO 5600X",
+])
+def test_missing_model_does_not_offer_a_different_cpu(sample_cpus: None, query: str) -> None:
+    assert lookup_csv(query) is None
+
+
+@pytest.mark.parametrize("query", ["10400F", "Intel Core i5-10400F @ 2900 MHz 6 cores 12 threads"])
+def test_partial_name_still_suggests_the_same_model(sample_cpus: None, query: str) -> None:
+    result = lookup_csv(query)
+    assert result is not None
+    assert "i5-10400F" in result["matched_cpu"]
+    assert result["confidence"] < 100

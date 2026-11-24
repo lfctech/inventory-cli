@@ -219,10 +219,12 @@ Tiers and bonuses are configurable in `config.toml`.
 3. Match against the bundled PassMark CSV using a matcher based on DebugOS. A unique
    normalized exact match reports 100% confidence and is accepted automatically.
 4. Fuzzy matches and duplicate exact matches require operator confirmation. A
-   missing or different clock favors the same CPU model. If no model matches
-   and the best raw similarity score is below 50, the CLI asks for an explicit
-   PassMark score. The legacy `[passmark].fuzzy_threshold` setting no longer
-   enables automatic acceptance of fuzzy matches.
+   missing or different clock favors the same CPU model. If the CPU name
+   specifies a model number, fuzzy suggestions must contain that full identifier,
+   including its suffix. If no eligible row remains, or the best fuzzy score is
+   below 50 without a matching model, supply a score with `--passmark`. The legacy
+   `[passmark].fuzzy_threshold` setting no longer enables automatic acceptance
+   of fuzzy matches.
 
 ---
 
