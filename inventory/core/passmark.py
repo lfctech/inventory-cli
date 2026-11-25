@@ -29,10 +29,13 @@ _TRADEMARK = re.compile(r"\((?:r|tm)\)", re.IGNORECASE)
 _NOISE = re.compile(
     r"\b\d+(?:st|nd|rd|th)\s+gen\s+|\b\d+\s*-\s*core\s+processor\b|\bcpu\b"
     r"|\b(?:with\s+|w/\s*)(?:amd\s+)?radeon\s+"
-    r"(?:vega\s+mobile\s+gfx|(?:(?:vega|hd|r\d+)\s+)?graphics)\b"
+    r"(?:vega\s+mobile\s+gfx|(?:(?:vega|hd|r\d+|\d{3}m)\s+)?graphics)\b"
     r"|\bradeon\s+r\d+,\s*\d+\s+compute\s+cores\s+\d+c\s*\+\s*\d+g\s*$",
     re.IGNORECASE | re.ASCII,
 )
+# Some Xeon E-series firmware inserts a standalone zero after the SKU.
+_XEON_PADDING = re.compile(r"(\bxeon\s+e[357]-\d{4}[a-z]*)\s+0(\s*@|\s*$)", re.IGNORECASE)
+_CORE2 = re.compile(r"\bcore\s+2\s+(duo|quad|solo|extreme)\b", re.IGNORECASE)
 _NON_ALNUM = re.compile(r"[\W_]+")
 _CLOCK_SUFFIX = re.compile(r"\s*@\s*\d+(?:\.\d+)?\s*[gm]hz\s*$", re.IGNORECASE)
 # Omit hardware specifications when extracting the model number.
@@ -70,7 +73,9 @@ class _Candidate(NamedTuple):
 def _normalize(name: str) -> str:
     # Keep clocks and model suffixes, as DebugOS does.
     unmarked = _TRADEMARK.sub(" ", name)
-    return _NON_ALNUM.sub(" ", _NOISE.sub(" ", unmarked).lower()).strip()
+    cleaned = _XEON_PADDING.sub(r"\1\2", _NOISE.sub(" ", unmarked))
+    cleaned = _CORE2.sub(r"core2 \1", cleaned)
+    return _NON_ALNUM.sub(" ", cleaned.lower()).strip()
 
 
 def _model(name: str, normalized: str) -> str:
@@ -148,7 +153,8 @@ def lookup_csv(cpu_name: str) -> PassmarkResult | None:
 
     exact = [candidate for candidate in candidates if candidate.normalized == query]
     if exact:
-        best = exact[0]
+        literal = cpu_name.strip()
+        best = next((row for row in exact if row.name == literal), exact[0])
         confidence = EXACT_CONFIDENCE if len(exact) == 1 else max(1, _round_ratio(100, len(exact)))
     else:
         tokens = frozenset(query.split())

@@ -107,6 +107,8 @@ def test_clock_discrepancy_prefers_correct_sku_and_requires_confirmation(query: 
         ("AMD Ryzen 5 PRO 2400GE w/ Radeon Vega Graphics", "AMD Ryzen 5 PRO 2400GE"),
         ("AMD Ryzen 3 PRO 3200GE w/ Radeon Vega Graphics", "AMD Ryzen 3 PRO 3200GE"),
         ("AMD A6-9225 RADEON R4, 5 COMPUTE CORES 2C+3G", "AMD A6-9225"),
+        ("AMD Ryzen 7 7840U w/ Radeon 780M Graphics", "AMD Ryzen 7 7840U"),
+        ("AMD Ryzen 5 7640U w/ Radeon 760M Graphics", "AMD Ryzen 5 7640U"),
         ("AMD A8-6410 APU with AMD Radeon R5 Graphics", "AMD A8-6410 APU"),
         ("AMD A10-5745M APU with Radeon(tm) HD Graphics", "AMD A10-5745M APU"),
     ],
@@ -148,3 +150,21 @@ def test_missing_ryzen_edition_rejects_its_sibling(monkeypatch, sku: str, missin
     monkeypatch.setattr(passmark, "_load_candidates", lambda: (row,))
     assert lookup_csv(f"{missing} with Radeon Graphics") is None
     assert lookup_csv(available) == {"matched_cpu": available, "score": 12000, "confidence": 100}
+
+
+def test_xeon_firmware_zero_before_clock_keeps_the_original_sku() -> None:
+    result = lookup_csv("Intel(R) Xeon(R) CPU E5-2690 0 @ 2.90GHz")
+    assert result == {"matched_cpu": "Intel Xeon E5-2690 @ 2.90GHz", "score": 9740, "confidence": 100}
+
+@pytest.mark.parametrize(("name", "expected"), [
+    ("Intel(R) Core(TM)2 Duo CPU E8400 @ 3.00GHz", "Intel Core2 Duo E8400 @ 3.00GHz"),
+    ("Intel Core 2 Quad Q6600 @ 2.40GHz", "Intel Core2 Quad Q6600 @ 2.40GHz"),
+])
+def test_core2_family_spelling(name: str, expected: str) -> None:
+    result = lookup_csv(name)
+    assert result is not None and result["matched_cpu"] == expected and result["confidence"] == 100
+
+
+@pytest.mark.parametrize(("name", "score"), [("Rockchip RK3328", 319), ("rockchip,rk3328", 761)])
+def test_literal_spelling_selects_which_duplicate_to_confirm(name: str, score: int) -> None:
+    assert lookup_csv(name) == {"matched_cpu": name, "score": score, "confidence": 50}
