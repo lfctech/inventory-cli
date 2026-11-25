@@ -216,8 +216,15 @@ Tiers and bonuses are configurable in `config.toml`.
 
 1. `--passmark` CLI flag → used directly
 2. Existing `cpu_passmark` value in Snipe-IT → used silently
-3. Fuzzy match against bundled `PassmarkCPUList.csv` → auto-accept if ≥ 80% confidence
-4. Low confidence → prompt operator to confirm
+3. Match against the bundled PassMark CSV using a matcher based on DebugOS. A unique
+   normalized exact match reports 100% confidence and is accepted automatically.
+4. Fuzzy matches and duplicate exact matches require operator confirmation. A
+   missing or different clock favors the same CPU model. If the CPU name
+   specifies a model number, fuzzy suggestions must contain that full identifier,
+   including its suffix. If no eligible row remains, or the best fuzzy score is
+   below 50 without a matching model, supply a score with `--passmark`. The legacy
+   `[passmark].fuzzy_threshold` setting no longer enables automatic acceptance
+   of fuzzy matches.
 
 ---
 

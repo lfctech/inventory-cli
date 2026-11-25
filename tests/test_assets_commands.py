@@ -614,9 +614,17 @@ def test_price_missing_ram_in_asset_errors_out(
     assert "no RAM value" in result.stderr.lower() or "ram" in result.stderr.lower()
 
 
+@pytest.mark.parametrize("confidence", [None, 91])
 def test_price_unresolved_passmark_errors_out(
-    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock, monkeypatch,
+    confidence: int | None,
 ) -> None:
+    # Even a suggestion above the old 80% threshold must not be written on decline.
+    if confidence is not None:
+        monkeypatch.setattr(
+            "inventory.commands.assets.lookup_csv",
+            lambda _: {"score": 8000, "matched_cpu": "Some CPU", "confidence": confidence},
+        )
     httpx_mock.add_response(
         method="GET",
         url=f"{TEST_URL}/api/v1/hardware/1",
@@ -639,6 +647,43 @@ def test_price_unresolved_passmark_errors_out(
     )
     assert result.exit_code == 1
     assert "could not resolve passmark score" in result.stderr.lower()
+    assert ("Accept this match?" in result.output) == (confidence is not None)
+    assert not any(r.method == "PATCH" for r in httpx_mock.get_requests())
+
+
+def test_price_procman_cpu_auto_accepts_without_renaming(
+    runner: CliRunner, fake_env, reset_state, config_file, httpx_mock
+) -> None:
+    cpu_name = "Intel(R) Core(TM) i5-8250U CPU @ 1.60GHz"
+    asset = asset_payload(
+        asset_id=1,
+        asset_tag="LFC-1",
+        custom_fields={
+            "CPU": {"field": "_snipeit_cpu_1", "value": cpu_name},
+            "CPU PassMark Score": {"field": "_snipeit_cpu_passmark_score_2", "value": ""},
+            "RAM (GB)": {"field": "_snipeit_ram_gb_3", "value": "16"},
+            "Storage (GB)": {"field": "_snipeit_storage_gb_4", "value": "512"},
+            "Sale Price": {"field": "_snipeit_sale_price_5", "value": ""},
+            "Touchscreen": {"field": "_snipeit_touchscreen_6", "value": "0"},
+        },
+    )
+    url = f"{TEST_URL}/api/v1/hardware/1"
+    httpx_mock.add_response(method="GET", url=url, json=asset)
+    httpx_mock.add_response(method="PATCH", url=url, json={"status": "success", "payload": asset})
+
+    result = runner.invoke(
+        app, ["--config", str(config_file), "--json", "assets", "price", "--id", "1"]
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(strip_ansi(result.stdout))
+    assert payload["passmark_source"] == "csv_auto"
+    assert payload["passmark_score"] == 5866
+    assert "Accept this match?" not in result.stderr
+    patch = next(r for r in httpx_mock.get_requests() if r.method == "PATCH")
+    body = json.loads(patch.content)
+    assert body["_snipeit_cpu_passmark_score_2"] == "5866"
+    assert "_snipeit_cpu_1" not in body
 
 
 def test_price_json_prompt_does_not_corrupt_stdout(

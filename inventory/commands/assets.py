@@ -19,7 +19,7 @@ from snipeit.resources.assets import Asset
 from ..application import InventoryService
 from ..config import AppConfig
 from ..console import abort, confirm, console, out, print_warning
-from ..core.passmark import lookup_csv
+from ..core.passmark import EXACT_CONFIDENCE, lookup_csv
 from ..core.pricing import calculate_price, is_desktop_category
 from ..core.resolvers import (
     resolve_category,
@@ -521,7 +521,7 @@ def price(
             except ValueError:
                 pass
 
-    # 3. CSV fuzzy match
+    # 3. CSV lookup (exact or operator-confirmed)
     if passmark_score is None:
         cpu_name = _get_custom_field_value(asset, cfg.custom_fields.cpu_model)
         if cpu_name:
@@ -533,13 +533,12 @@ def price(
                     f"score: [bold]{result['score']}[/bold]  "
                     f"confidence: {result['confidence']}%"
                 )
-                if result["confidence"] >= cfg.passmark.fuzzy_threshold:
+                if result["confidence"] == EXACT_CONFIDENCE:
                     passmark_score = result["score"]
                     passmark_source = "csv_auto"
                 else:
-                    # Prompt operator
                     console.print(
-                        f"  [yellow]Low confidence ({result['confidence']}% < {cfg.passmark.fuzzy_threshold}%)[/yellow]"
+                        "  [yellow]No unique exact CPU match; verify the suggested model.[/yellow]"
                     )
                     accept = confirm("  Accept this match?", default=False)
                     if accept:
