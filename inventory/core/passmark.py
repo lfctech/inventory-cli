@@ -39,6 +39,7 @@ _CLOCK_SUFFIX = re.compile(r"\s*@\s*\d+(?:\.\d+)?\s*[gm]hz\s*$", re.IGNORECASE)
 _HARDWARE_SPEC = re.compile(
     r"\b\d+(?:\.\d+)?\s*[gm]hz\b|\b\d+[-\s]+(?:cores?|threads?)\b", re.IGNORECASE
 )
+_SKU_DIGITS = re.compile(r"[0-9]{3}")
 _MODEL_QUALIFIERS = frozenset({
     "athlon", "atom", "celeron", "epyc", "pentium", "ryzen", "xeon",
     "pro", "max", "ultra", "plus", "gold", "silver", "platinum", "bronze",
@@ -84,6 +85,10 @@ def _identifiers(name: str) -> frozenset[str]:
     numbers = {token for token in tokens if any(char.isdigit() for char in token)}
     if numbers:
         numbers.update(_MODEL_QUALIFIERS.intersection(tokens))
+        # A Ryzen family name plus a SKU identifies the standard edition unless
+        # PRO is stated. A family-only query or a bare SKU leaves edition open.
+        if "ryzen" in numbers and "pro" not in numbers and any(_SKU_DIGITS.search(t) for t in numbers):
+            numbers.add("standard ryzen")
     return frozenset(numbers)
 
 

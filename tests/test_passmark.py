@@ -136,3 +136,15 @@ def test_partial_name_still_suggests_the_same_model(sample_cpus: None, query: st
     assert result is not None
     assert "i5-10400F" in result["matched_cpu"]
     assert result["confidence"] < 100
+
+
+@pytest.mark.parametrize("sku", ["7730U", "3700U"])
+@pytest.mark.parametrize("missing_pro", [False, True])
+def test_missing_ryzen_edition_rejects_its_sibling(monkeypatch, sku: str, missing_pro: bool) -> None:
+    standard = f"AMD Ryzen 7 {sku}"
+    pro = f"AMD Ryzen 7 PRO {sku}"
+    missing, available = (pro, standard) if missing_pro else (standard, pro)
+    row = passmark._Candidate.from_row(available, 12000)
+    monkeypatch.setattr(passmark, "_load_candidates", lambda: (row,))
+    assert lookup_csv(f"{missing} with Radeon Graphics") is None
+    assert lookup_csv(available) == {"matched_cpu": available, "score": 12000, "confidence": 100}
